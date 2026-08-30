@@ -20,8 +20,16 @@ structurally impossible for a language model to have produced or altered.
 ## Running it (placeholder — see Day 7 for the finished version)
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 docker compose up
 ```
+
+The virtual environment keeps this project's dependencies isolated from whatever else is
+installed system-wide — `pip install` without one installs into your global/Homebrew Python and
+can silently upgrade packages other tools on your machine depend on. `.venv/` is already in
+`.gitignore`, so it's never committed.
 
 Neo4j will come up on `bolt://localhost:7687`. The app service is currently a placeholder
 (`sleep infinity`) until `src/main.py` exists.
