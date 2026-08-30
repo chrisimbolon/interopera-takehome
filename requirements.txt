@@ -1,0 +1,23 @@
+# Core
+pydantic>=2.7
+PyYAML>=6.0
+typer>=0.12
+
+# Graph store
+neo4j>=5.20,<6.0
+
+# PDF extraction (pdfplumber, not PyMuPDF - see docs/02_architecture.md SS5)
+pdfplumber>=0.11
+
+# Excel read/write
+openpyxl>=3.1
+
+# LLM (Day 6 — guideline extraction assist + narrative layer only)
+anthropic>=0.34
+
+# Testing
+pytest>=8.2
+
+# Deliberately NOT included: pandas (float64 conflicts with the Decimal-only
+# numeric policy in docs/00_metric_catalog.md), FastAPI, NetworkX — see
+# docs/02_architecture.md §5 for why.
