@@ -1,0 +1,76 @@
+<svg width="680" height="878" viewBox="0 0 680 878" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Merged architecture overview</title>
+<desc>Source documents flow through ingestion and extraction, a human graph review gate, into a knowledge graph. The graph and a firm config file both feed a deterministic compute engine, producing figures with provenance that split into reconciliation and a narrative-plus-firewall check, converging into report export.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect width="680" height="878" fill="#ffffff"/>
+
+<g>
+<rect x="180" y="40" width="320" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="340" y="58" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#2C2C2A">Source documents</text>
+<text x="340" y="78" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#444441">Guidelines PDF, holdings CSV</text>
+</g>
+
+<g>
+<rect x="180" y="146" width="320" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text x="340" y="164" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#26215C">Ingestion / extraction</text>
+<text x="340" y="184" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#3C3489">Deterministic first, LLM later</text>
+</g>
+
+<g>
+<rect x="180" y="252" width="320" height="56" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+<text x="340" y="270" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#4A1B0C">Human graph review</text>
+<text x="340" y="290" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#712B13">Approve or reject</text>
+</g>
+
+<g>
+<rect x="50" y="358" width="270" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="185" y="376" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#042C53">Knowledge graph</text>
+<text x="185" y="396" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Firm-agnostic facts</text>
+</g>
+<g>
+<rect x="350" y="358" width="270" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="485" y="376" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#042C53">Firm config</text>
+<text x="485" y="396" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Firm A or firm B</text>
+</g>
+
+<g>
+<rect x="180" y="464" width="320" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="340" y="482" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#04342C">Deterministic compute engine</text>
+<text x="340" y="502" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#085041">No LLM in this path</text>
+</g>
+
+<g>
+<rect x="180" y="570" width="320" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="340" y="588" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#04342C">Figure + provenance</text>
+<text x="340" y="608" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#085041">Value, graph_path, citation</text>
+</g>
+
+<g>
+<rect x="50" y="676" width="270" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="185" y="694" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#04342C">Reconciliation</text>
+<text x="185" y="714" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#085041">Vs answer key</text>
+</g>
+<g>
+<rect x="350" y="676" width="270" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text x="485" y="694" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#26215C">Narrative + firewall</text>
+<text x="485" y="714" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#3C3489">Commentary only, no new numbers</text>
+</g>
+
+<g>
+<rect x="180" y="782" width="320" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="340" y="800" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="14" font-weight="500" fill="#2C2C2A">Report export</text>
+<text x="340" y="820" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#444441">XLSX report, audit log</text>
+</g>
+
+<line x1="340" y1="96" x2="340" y2="146" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<line x1="340" y1="202" x2="340" y2="252" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M340 308 L340 328 L185 328 L185 348" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M340 308 L340 328 L485 328 L485 348" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M185 414 L185 439 L340 439 L340 454" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M485 414 L485 439 L340 439 L340 454" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<line x1="340" y1="520" x2="340" y2="570" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M340 626 L340 651 L185 651 L185 666" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M340 626 L340 651 L485 651 L485 666" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M185 732 L185 757 L340 757 L340 772" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+<path d="M485 732 L485 757 L340 757 L340 772" fill="none" stroke="#5F5E5A" stroke-width="0.5" marker-end="url(#arrow)"/>
+</svg>
