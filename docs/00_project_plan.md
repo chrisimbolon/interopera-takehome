@@ -21,7 +21,7 @@ state. Both are folded in below. No day introduces work outside what the brief s
 | **2** | Phase 2 (deterministic) | **Complete, verified against a live Neo4j.** `src/ingestion/` parses `sample_fund_guidelines.pdf` and `sample_holdings.csv` directly — no LLM. `src/graph/builder.py` commits the result to Neo4j with `SOURCED_FROM` provenance (page/row references, `extraction_confidence: 1.0` for a direct parse). Multi-hop traversal queries in `src/graph/queries.py`. Acceptance test passed for real: "what's the breach action and owner if duration exceeds its limit?" resolved via `cypher-shell` against the running container, not a simulation. One real bug found and fixed in the process: the CSV and PDF spell 3 of 7 asset classes differently (`"Foreign Currency Bonds"` vs `"...(hedged)"`, etc.), which silently broke 4 `BELONGS_TO` edges — caught by a live edge count (`96` vs expected `100`), not by pure-Python testing alone. Fixed with an explicit alias map plus a new `GraphPlan.validate()` that now catches this entire bug class pre-database. |
 | **3** | Phase 3 | **Complete, verified against a live Neo4j.** `src/computation/status.py` (the `BREACH`/`AT_LIMIT`/`OK` policy plus utilization convention, tested against 10 real cases), `metrics.py` (all 13 report rows, pure Decimal arithmetic), `rules.py` (Pydantic-validated Firm config, enum-constrained methods), `engine.py` (the real figure assembler — Neo4j proves the traversal, Python does the arithmetic). **Checkpoint passed twice: first offline, diffed programmatically against the real `firm_A_answer_key.xlsx` file, all 13 rows byte-exact; then live, `engine.py` against the actual running Neo4j container, same 13/13 match, every figure with a resolved citation.** Two real issues found and fixed along the way: `determine_utilization` initially returned a raw ratio instead of a percentage (caught immediately by the offline test); and after adding structured `limit_min`/`limit_max` to `RiskLimit`, the live graph still had the old schema until `--write` was re-run — a reminder that any `builder.py` change needs a graph re-sync before `engine.py` can see it. |
 | **4** | Phase 4 | **Complete, verified against a live Neo4j, both firms.** `configs/firm_b.yaml` (fallen-angel rating rule, parent-issuer GRE grouping, truncated-bps display) validated by the same Pydantic schema from Day 3 — zero schema changes needed, its enum-constrained `method` fields already covered Firm B's values. `metrics.py`'s two `NotImplementedError` stubs from Day 3 filled in with real logic: rating-based non-IG (a *union* with Firm A's asset-class set, not a replacement — re-reading `firm_B_brief.md` closely mattered here, a naive rating-only filter would have wrongly dropped an AAA-rated Structured Credit holding out of the aggregate) and parent-issuer GRE grouping. **Checkpoint passed three times: offline (both firms computed side by side, all 3 documented differences matched exactly, all 10 identical figures stayed identical); live via `--firm firm_a`/`--firm firm_b` (initially a hardcoded method-selection ternary in `engine.py`'s CLI — caught by checking, not assumed clean, and replaced with an actual `configs/{firm}.yaml` load through `rules.load_firm_config()`); and structurally (`grep`'d the entire computation core for firm-identity branching — zero, confirmed on both the pre- and post-fix versions).** One more real bug caught before it shipped: `format_truncated_bps` was written assuming a raw fraction input, inconsistent with `determine_utilization`'s percentage-scaled output since Day 3's fix — caught and fixed before Firm B ever exercised that code path, verified against the exact `58.333...% → 5833 bps` trap case. |
-| **5** | Phase 5 | Figure lineage + `verify_figure_traceability()` (missing citation/path → explicit `UNTRACEABLE_FIGURE`, never silent). `src/reconciliation/reconciler.py` (expected/actual/delta/pass-fail per figure, both firms). Append-only audit log (`src/audit/logger.py`, insert-only, DB-level rejection of `UPDATE`/`DELETE`). Audit replay by `run_id`. |
+| **5** | Phase 5 | **Complete, verified against a live Neo4j, both firms.** `src/reconciliation/traceability.py` (`verify_figure_traceability()`, Gate 2), `src/reconciliation/reconciler.py` (per-figure expected/actual/delta/pass-fail), `src/audit/logger.py` (append-only, hash-chained SQLite), `scripts/reconcile.py` (the Phase 5 orchestration). **Checkpoint passed live, both firms: `python3 scripts/reconcile.py --firm firm_a` and `--firm firm_b` each report 13/13 figures traceable, 13/13 rows reconciled, audit chain valid, `OVERALL: PASS`.** One real bug caught between the offline pass and this live run: `python3 scripts/reconcile.py` (direct invocation) raised `ModuleNotFoundError: No module named 'src'` — Python resolves direct script invocation's import path from the script's own folder, not the project root, unlike every other module in this repo which had only ever been run via `-m`. Fixed by having the script locate its own project root and prepend it to `sys.path`; verified working both from the project root and invoked by full path from `/tmp`. One deliberate scope limit carried through unchanged: Firm B's utilization is checked by *format shape* only, not an exact expected bps value — see `reconciler.py`'s module docstring for why reformatting Firm A's already-rounded answer-key percentage would compound rounding error. |
 | **6** | Phase 2 (LLM) + narrative | *Only now* does the LLM enter: `src/extraction/` plugs into the same ingestion boundary from Day 2 — PDF → chunks → structured extraction → validation → Gate 1 human review. `src/narrative/generator.py` writes commentary over already-approved figures (read-only) and runs the number firewall. `src/reporting/excel.py` populates `report_template.xlsx` from `ComputedFigure[]` only, never from LLM output. |
 | **7** | Wrap-up | Clean-clone `docker compose up` test. Determinism test (two Firm A runs, byte-identical JSON). Firewall injection test, missing-provenance test, audit-immutability test. README with a runnable evaluation-commands section. Bonus items only if Phases 3–5 are solid. |
 
@@ -49,13 +49,18 @@ Day 7's bonus scope, never by rushing Day 3 or Day 4.
 
 ## Proposed repository structure
 
+**Updated to match what's actually on disk as of end of Day 5**, not the original Day 1 sketch —
+six real divergences accumulated over the week, listed below the tree rather than left silently
+unreconciled.
+
 ```
 interopera-takehome/
 ├── docs/
 │   ├── 00_project_plan.md        # this file
-│   ├── 00_metric_catalog.md      # Day 1: formulas, limits, Firm A/B behavior per figure — pending
+│   ├── 00_metric_catalog.md
 │   ├── 01_flow_and_audit_events.md
 │   ├── 02_architecture.md
+│   ├── 02_architecture.svg
 │   └── 03_rfc.md
 ├── sample_docs/                  # provided source files, unmodified
 │   ├── sample_fund_guidelines.pdf
@@ -67,6 +72,8 @@ interopera-takehome/
 │   ├── ingestion/                # Day 2 — deterministic parsing, no LLM
 │   │   ├── guidelines.py
 │   │   └── holdings.py
+│   ├── common/                   # cross-module shared logic (see divergence #1 below)
+│   │   └── naming.py
 │   ├── extraction/               # Day 6 — LLM-assisted structuring, same boundary as ingestion/
 │   │   ├── llm.py
 │   │   ├── schemas.py
@@ -74,49 +81,61 @@ interopera-takehome/
 │   ├── graph/
 │   │   ├── schema.cypher         # constraints + indexes
 │   │   ├── builder.py            # candidate graph → Gate 1 → Neo4j commit
-│   │   ├── provenance.py
 │   │   └── queries.py
 │   ├── computation/
-│   │   ├── engine.py             # rule interpreter: config → Cypher template (no LLM)
+│   │   ├── engine.py             # Neo4j-backed figure assembler
 │   │   ├── metrics.py            # allocation, non-IG, concentration, liquidity, duration, DV01
-│   │   └── status.py             # reusable BREACH / AT_LIMIT / OK policy
-│   ├── configuration/
-│   │   ├── loader.py
-│   │   └── schema.py             # Pydantic, enum-constrained methods — config selects, never defines
+│   │   ├── status.py             # reusable BREACH / AT_LIMIT / OK policy
+│   │   └── rules.py              # Pydantic firm config schema + loader (see divergence #2)
 │   ├── reconciliation/
-│   │   └── reconciler.py
+│   │   ├── reconciler.py         # expected/actual/delta/pass-fail per figure, both firms
+│   │   └── traceability.py       # Gate 2 — figure → graph_path → citation check
 │   ├── audit/
-│   │   ├── logger.py             # append-only, insert-only
-│   │   └── models.py
-│   ├── reporting/
+│   │   └── logger.py             # append-only, hash-chained, insert-only
+│   ├── reporting/                # Day 6 — populates report_template.xlsx
 │   │   └── excel.py              # receives ComputedFigure[] only, never raw LLM output
-│   └── narrative/
+│   └── narrative/                # Day 6
 │       └── generator.py          # LLM commentary + number firewall
 ├── configs/
 │   ├── firm_a.yaml
 │   └── firm_b.yaml
-├── tests/
-│   ├── test_graph.py
-│   ├── test_computation.py
-│   ├── test_traceability.py
-│   ├── test_determinism.py
-│   ├── test_reconciliation.py
-│   └── test_llm_firewall.py
 ├── scripts/
-│   ├── ingest.py
-│   ├── run_report.py
-│   ├── reconcile.py
-│   └── verify_audit.py
+│   └── reconcile.py              # Phase 5 orchestration: reconciliation + traceability + audit
 ├── docker-compose.yml            # Neo4j + app service
 ├── requirements.txt
 └── README.md                     # single documented startup command
 ```
 
+Six real divergences from the original Day 1 sketch, reconciled here rather than left stale:
+
+1. **`src/common/naming.py` — never planned, added Day 3.** Extracted after the `BELONGS_TO` bug
+   (commit `d098c92`) once `metrics.py` needed the identical CSV-to-PDF asset-class reconciliation
+   `builder.py` already had — defining it twice would've recreated the same drift risk.
+2. **`rules.py` lives in `computation/`, not a separate `configuration/` package.** The original plan
+   split them; in practice `rules.py`'s method-selection is tightly coupled to `metrics.py`'s
+   dispatch tables (`NON_IG_METHODS`, `GRE_METHODS`), and a separate package added indirection
+   without buying anything.
+3. **No `src/graph/provenance.py`.** Provenance is a `Provenance` dataclass defined directly in
+   `src/ingestion/holdings.py` and `guidelines.py` (where it's produced), not a separate module —
+   there was never enough distinct provenance-handling logic to justify splitting it out.
+4. **No `src/audit/models.py`.** `AuditEvent` is a small dataclass defined directly in
+   `logger.py` — same reasoning as #3, not enough separate content to warrant a second file.
+5. **No `tests/` directory.** Every module tests itself via an `if __name__ == "__main__":` block
+   at the bottom (see `status.py`, `metrics.py`, `logger.py`, `traceability.py`, `reconciler.py`)
+   rather than a separate pytest suite — deliberate, not dropped: each module's own tests sit next
+   to the code they verify and run with zero extra setup (`python3 -m src.audit.logger`), which
+   fit this week's actual working rhythm (write, verify immediately, commit) better than a
+   separate suite would have. Worth reconsidering for Day 7 polish if time allows, not before.
+6. **`scripts/` only has `reconcile.py` so far.** `ingest.py`, `run_report.py`, `verify_audit.py`
+   were always Day 6/7 concerns (LLM ingestion entrypoint, final report export, standalone audit
+   verification) — not missing, just not due yet.
+
 Each top-level `src/` folder still maps to one architectural boundary from `docs/03_rfc.md`:
-`graph/` and `configuration/` are the two things `computation/` reads; `computation/` is the
-deterministic core, with the LLM sandboxed into `narrative/` (read-only over already-computed
-figures) and `extraction/` (write-only into the graph, gated by human review, never read by
-`computation/` directly). `audit/` is append-only and touched by every other module but owned by
-none of them.
+`graph/` and `computation/rules.py` are the two things the rest of `computation/` reads;
+`computation/` is the deterministic core, with the LLM sandboxed into `narrative/` (read-only over
+already-computed figures) and `extraction/` (write-only into the graph, gated by human review,
+never read by `computation/` directly). `audit/` is append-only and touched by every other module
+but owned by none of them. `reconciliation/` reads `computation/`'s output and the real answer-key
+oracles — it never reads from `graph/` or `extraction/` directly.
 
 **Resolved:** Neo4j, not NetworkX. This was left open after Day 1 pending a real decision point; by end of Day 3 it's been the actual, working choice through two full live-database checkpoints (Day 2's acceptance test, Day 3's 13-figure reconciliation), including finding and fixing a real bug (`BELONGS_TO` cross-document naming mismatch) that a live edge count caught and pure-Python testing alone would not have. The operational risk flagged on Day 1 was real but manageable; the traceability payoff (a literal Cypher query as `graph_path`) has been worth it in practice, not just in theory.
