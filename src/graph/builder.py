@@ -40,11 +40,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from src.common.naming import canonical_asset_class
 from src.ingestion.guidelines import ParsedGuidelines
 from src.ingestion.holdings import Position
 
 # Known breach-action text -> (owner role, action detail), from the
-# guidelines' Risk Limits & Monitoring table (section 3.1). Deterministic
 # lookup against THIS document's known, finite set of rows - same
 # reasoning as the anchor lists in src/ingestion/guidelines.py: this is
 # Day 2's deterministic-parse scope, not the LLM path's job.
@@ -95,6 +95,13 @@ class Statement:
     description: str
 
 
+class GraphPlanError(Exception):
+    """Raised by GraphPlan.validate() when an edge references a node that
+    was never added to the plan - a dangling cross-reference between two
+    source documents that disagree on how to spell the same thing (see
+    validate()'s docstring for the exact bug this caught)."""
+
+
 @dataclass
 class GraphPlan:
     nodes: list[NodeSpec] = field(default_factory=list)
@@ -109,9 +116,44 @@ class GraphPlan:
     def add_edge(self, edge: EdgeSpec) -> None:
         self.edges.append(edge)
 
+    def validate(self) -> None:
+        """Check every edge's endpoints actually exist among this plan's
+        nodes. Raises GraphPlanError naming the exact dangling reference
+        if not.
+
+        This exists because of a real bug: builder.py originally assumed
+        Position.asset_class (from the holdings CSV) would exactly
+        string-match AssetClass.name (from the guidelines PDF) for the
+        BELONGS_TO edge. It didn't, for 3 of 7 asset classes ("Singapore
+        Government Securities" vs "...(SGS)", etc.) - and nothing in
+        pure-Python testing caught it, because both node label sets
+        looked internally fine. It only surfaced as a live-database edge
+        count mismatch (BELONGS_TO: 9 actual vs 13 expected), three
+        verification steps after the write already claimed success.
+
+        Calling validate() before to_cypher_statements() turns that
+        entire bug class into an immediate, specific, pre-database
+        error instead of a silent gap discovered by counting rows later.
+        """
+        node_refs = {n.node_ref for n in self.nodes}
+        for e in self.edges:
+            if e.from_ref not in node_refs:
+                raise GraphPlanError(
+                    f"Edge {e.rel_type} references missing source node "
+                    f"{e.from_ref} - no NodeSpec with that (label, key) was "
+                    f"added to the plan."
+                )
+            if e.to_ref not in node_refs:
+                raise GraphPlanError(
+                    f"Edge {e.rel_type} from {e.from_ref} references missing "
+                    f"target node {e.to_ref} - no NodeSpec with that "
+                    f"(label, key) was added to the plan."
+                )
+
     def to_cypher_statements(self) -> list[Statement]:
         """Generate idempotent MERGE statements. Node merges first (so
         every edge target already exists), then edge merges."""
+        self.validate()
         statements: list[Statement] = []
         for n in self.nodes:
             cypher = (
@@ -274,7 +316,7 @@ def build_graph_plan(
         chunk_ref = _add_chunk(p.provenance, holdings_doc.node_ref)
         plan.add_edge(EdgeSpec(pos_node.node_ref, chunk_ref, "SOURCED_FROM"))
 
-        asset_class_ref = ("AssetClass", p.asset_class)
+        asset_class_ref = ("AssetClass", canonical_asset_class(p.asset_class))
         plan.add_edge(EdgeSpec(pos_node.node_ref, asset_class_ref, "BELONGS_TO"))
 
         issuer_node = NodeSpec(
@@ -340,6 +382,8 @@ def build_graph_plan(
             {
                 "name": r.name,
                 "limit_text": r.limit_text,
+                "limit_min": _d(r.limit_min) if r.limit_min is not None else None,
+                "limit_max": _d(r.limit_max) if r.limit_max is not None else None,
                 "monitoring_frequency": r.monitoring_frequency,
                 "extraction_confidence": r.provenance.extraction_confidence,
             },

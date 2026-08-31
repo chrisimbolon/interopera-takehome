@@ -21,6 +21,67 @@ the plan document.
 from __future__ import annotations
 
 
+def all_positions_with_graph_attributes() -> tuple[str, dict]:
+    """Single traversal reconstructing every field metrics.py's Position
+    dataclass needs - asset_class and issuer_type aren't stored directly
+    on Position (correctly normalized onto AssetClass/Issuer nodes), so
+    this joins across BELONGS_TO, ISSUED_BY, and ROLLS_UP_TO in one query
+    rather than requiring N+1 round trips per position."""
+    cypher = """
+    MATCH (p:Position)-[:BELONGS_TO]->(ac:AssetClass)
+    MATCH (p)-[:ISSUED_BY]->(i:Issuer)
+    OPTIONAL MATCH (i)-[:ROLLS_UP_TO]->(parent:Issuer)
+    RETURN p.instrument_id AS instrument_id,
+           p.instrument_name AS instrument_name,
+           ac.name AS asset_class,
+           i.name AS issuer_name,
+           i.issuer_type AS issuer_type,
+           parent.name AS parent_issuer,
+           p.market_value_sgd AS market_value_sgd,
+           p.modified_duration AS modified_duration,
+           p.credit_rating AS credit_rating,
+           p.downgraded_from AS downgraded_from
+    """
+    return cypher, {}
+
+
+def all_allocation_limits() -> tuple[str, dict]:
+    cypher = "MATCH (a:AssetClass) RETURN a.name AS asset_class, a.min_allocation AS min_pct, a.max_allocation AS max_pct"
+    return cypher, {}
+
+
+def all_concentration_limits() -> tuple[str, dict]:
+    cypher = "MATCH (c:ConcentrationCap) RETURN c.name AS name, c.cap_pct AS cap_pct"
+    return cypher, {}
+
+
+def liquidity_requirement() -> tuple[str, dict]:
+    cypher = "MATCH (l:LiquidityRequirement {name: 'liquidity'}) RETURN l.floor_normal_pct AS floor_normal_pct, l.floor_stress_pct AS floor_stress_pct"
+    return cypher, {}
+
+
+def risk_limit(metric_name: str) -> tuple[str, dict]:
+    cypher = "MATCH (m:RiskMetric {name: $metric_name}) RETURN m.limit_min AS limit_min, m.limit_max AS limit_max, m.limit_text AS limit_text"
+    return cypher, {"metric_name": metric_name}
+
+
+def non_ig_cap() -> tuple[str, dict]:
+    cypher = "MATCH (a:Aggregate {name: 'non_ig_exposure'}) RETURN a.cap_pct AS cap_pct"
+    return cypher, {}
+
+
+def citation_for_node(label: str, key_prop: str, key_val: str) -> tuple[str, dict]:
+    """Generic citation lookup - works for any node type carrying exactly
+    one SOURCED_FROM edge (AssetClass, Aggregate, ConcentrationCap,
+    LiquidityRequirement, RiskMetric all qualify). Returns the
+    graph_path components + citation every Phase 3 figure needs."""
+    cypher = f"""
+    MATCH (n:{label} {{{key_prop}: $key_val}})-[:SOURCED_FROM]->(c:SourceChunk)-[:PART_OF]->(d:SourceDocument)
+    RETURN c.page AS source_page, c.chunk_id AS source_chunk, d.filename AS source_document
+    """
+    return cypher, {"key_val": key_val}
+
+
 def duration_breach_action_and_owner() -> tuple[str, dict]:
     """The Day 2 acceptance test, as real Cypher: 'what's the breach
     action and owner if duration exceeds its limit?' - answered by

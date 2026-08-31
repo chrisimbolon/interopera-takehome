@@ -1,0 +1,15 @@
+# Firm A - default methodology, per sample_fund_guidelines.pdf's
+# straightforward reading. See docs/00_metric_catalog.md and
+# firm_B_brief.md for what each method name means and how Firm B
+# differs.
+firm:
+  id: firm_a
+
+non_ig:
+  method: by_asset_class
+
+gre:
+  method: by_issuer
+
+utilization:
+  method: percent_1dp

@@ -96,6 +96,32 @@ class RiskLimit:
     monitoring_frequency: str
     breach_action: str
     provenance: Provenance
+    limit_min: Decimal | None = None
+    limit_max: Decimal | None = None
+    # limit_min/limit_max are populated only for risk limits the 13-figure
+    # report actually computes against (Modified Duration, Portfolio DV01) -
+    # see _extract_structured_bounds() below. The other four risk limits
+    # (VaR, Expected Shortfall, Tracking Error, Interest Rate Sensitivity)
+    # are out of scope for computation per docs/00_metric_catalog.md's
+    # "Out of scope for this report" section, so they stay None rather
+    # than getting a structured parse nothing will ever use.
+
+
+def _extract_structured_bounds(name: str, limit_text: str) -> tuple[Decimal | None, Decimal | None]:
+    """Deterministic, anchored parse of the two risk limits computation
+    actually needs. Same reasoning as every other anchor in this module:
+    known, finite set of rows in a known document - not a generic
+    'parse any risk limit' parser, which is explicitly out of scope for
+    Day 2's deterministic-parse boundary (see module docstring)."""
+    if name == "Modified Duration":
+        m = re.match(r"([\d.]+)\s*[\u2013-]\s*([\d.]+)\s*years", limit_text)
+        if m:
+            return Decimal(m.group(1)), Decimal(m.group(2))
+    elif name == "Portfolio DV01":
+        m = re.search(r"SGD\s*([\d,]+)\s*per bp", limit_text)
+        if m:
+            return None, Decimal(m.group(1).replace(",", ""))
+    return None, None
 
 
 @dataclass(frozen=True)
@@ -246,15 +272,19 @@ def _parse_risk_limits(pages: dict[int, str], doc_name: str) -> list[RiskLimit]:
             )
         page_num, m = found
         chunk_id = f"page:{page_num}:risk_limit:{name}"
+        limit_text = m.group(1).strip()
+        limit_min, limit_max = _extract_structured_bounds(name, limit_text)
         results.append(
             RiskLimit(
                 name=name,
-                limit_text=m.group(1).strip(),
+                limit_text=limit_text,
                 monitoring_frequency=m.group(2),
                 breach_action=m.group(3).strip(),
                 provenance=_make_provenance(
                     doc_name, page_num, chunk_id, CONFIDENCE_CLEAN_MATCH, m.group(0)
                 ),
+                limit_min=limit_min,
+                limit_max=limit_max,
             )
         )
 
