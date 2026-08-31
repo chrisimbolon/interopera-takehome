@@ -271,6 +271,8 @@ if __name__ == "__main__":
     import os
     import sys
 
+    from src.computation.rules import load_firm_config
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--firm", choices=["firm_a", "firm_b"], default="firm_a")
     args = parser.parse_args()
@@ -279,10 +281,24 @@ if __name__ == "__main__":
     user = os.environ.get("NEO4J_USER", "neo4j")
     password = os.environ.get("NEO4J_PASSWORD", "interopera_dev_only")
 
-    print(f"Connecting to {uri} as {user} (--firm {args.firm}) ...")
+    config_path = f"configs/{args.firm}.yaml"
+    print(f"Loading {config_path} ...")
+    try:
+        config = load_firm_config(config_path)
+    except Exception as exc:
+        print(f"CONFIG LOAD FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"  firm.id={config.firm.id}  non_ig.method={config.non_ig.method}  "
+          f"gre.method={config.gre.method}  utilization.method={config.utilization.method}")
+
+    print(f"\nConnecting to {uri} as {user} ...")
     try:
         eng = Neo4jFigureEngine(uri, user, password)
-        results = eng.compute_firm_a_figures() if args.firm == "firm_a" else eng.compute_firm_b_figures()
+        results = eng.compute_figures(
+            non_ig_method=config.non_ig.method,
+            gre_method=config.gre.method,
+            utilization_display=config.utilization.method,
+        )
         eng.close()
     except Exception as exc:
         print(f"FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
