@@ -98,6 +98,20 @@ def check_narrative_firewall(narrative_text: str, figures: list[Figure]) -> Fire
     either normalize to a number present in the given figures, or be a
     standalone 4-digit year (1900-2099). Anything else is a violation -
     returned explicitly, never silently passed through.
+
+    Stated scope limit, not an oversight: this checks the NUMBER SET,
+    not number-to-metric ATTRIBUTION. A narrative that misattributes a
+    real number to the wrong metric (e.g. citing Cash's 4.0% as if it
+    were SGS's value) would pass this check cleanly - the number is
+    legitimately in the allowed set, just paired with the wrong name in
+    the prose. Verified by hand against three real live-generated
+    narratives (see the Day 6 conversation record) that every pairing
+    was correct in practice, but that's a property of those specific
+    runs, not something this function guarantees. A real attribution
+    checker would need to parse which metric name is nearest which
+    number in the text - fuzzy, error-prone NLP matching that risks
+    introducing more false positives than the narrow number-set check
+    it would replace. Left as a stated limit rather than a fragile fix.
     """
     allowed = build_allowed_number_set(figures)
     violations = []
@@ -120,6 +134,7 @@ def check_narrative_firewall(narrative_text: str, figures: list[Figure]) -> Fire
 
 if __name__ == "__main__":
     from decimal import Decimal
+
     from src.computation.status import Status
 
     # Real figures, not synthetic - same shape metrics.py actually produces.

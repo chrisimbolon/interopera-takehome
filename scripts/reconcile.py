@@ -52,14 +52,47 @@ AUDIT_DB_PATH = "audit.db"
 def run(firm: str, run_id: str) -> bool:
     """Returns True if reconciliation AND traceability both fully pass
     for the given firm. Exit code reflects this, so the script is
-    usable in CI, not just interactively."""
+    usable in CI, not just interactively.
+
+    Builds and writes the graph as its first step - per the brief's
+    hard requirement ("must start with a single documented command"),
+    this is meant to be the ONE command a fresh clone needs, not one
+    of a sequence the evaluator has to know to run in order. MERGE-based
+    writes are idempotent, so this is safe to run every time, not just
+    once - no separate 'did I already build the graph?' state to track.
+    """
     uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
     user = os.environ.get("NEO4J_USER", "neo4j")
     password = os.environ.get("NEO4J_PASSWORD", "interopera_dev_only")
 
     audit = AuditLogger(AUDIT_DB_PATH)
 
-    print(f"Connecting to {uri} as {user} ...")
+    print("--- Building and writing the graph ---")
+    try:
+        from src.graph.builder import Neo4jGraphWriter, build_graph_plan
+        from src.ingestion.guidelines import parse_guidelines
+        from src.ingestion.holdings import parse_holdings
+
+        parsed_guidelines = parse_guidelines("sample_docs/sample_fund_guidelines.pdf")
+        positions = parse_holdings("sample_docs/sample_holdings.csv")
+        plan = build_graph_plan(parsed_guidelines, positions)
+
+        writer = Neo4jGraphWriter(uri, user, password)
+        statement_count = writer.apply(plan)
+        writer.close()
+
+        print(f"Applied {statement_count} MERGE statements "
+              f"({len(plan.nodes)} nodes, {len(plan.edges)} edges).")
+        audit.append(
+            "GRAPH_INGESTED", run_id=run_id,
+            payload={"nodes": len(plan.nodes), "edges": len(plan.edges), "statements": statement_count},
+        )
+    except Exception as exc:
+        print(f"GRAPH BUILD FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+        audit.close()
+        return False
+
+    print(f"\nConnecting to {uri} as {user} ...")
     try:
         engine = Neo4jFigureEngine(uri, user, password)
     except Exception as exc:

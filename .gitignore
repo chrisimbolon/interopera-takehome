@@ -15,3 +15,5 @@ htmlcov/
 *.sqlite3
 
 .DS_Store
+
+/test_*.py
