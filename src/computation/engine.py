@@ -27,7 +27,9 @@ from src.common.naming import canonical_asset_class
 from src.computation import metrics
 from src.computation.status import Status
 from src.graph import queries
-from src.ingestion.guidelines import AllocationLimit, ConcentrationLimit, LiquidityRequirement, NonIGDefinition, ParsedGuidelines, RiskLimit
+from src.ingestion.guidelines import (AllocationLimit, ConcentrationLimit,
+                                      LiquidityRequirement, NonIGDefinition,
+                                      ParsedGuidelines, RiskLimit)
 from src.ingestion.holdings import Position, Provenance, compute_nav
 
 
@@ -176,14 +178,32 @@ class Neo4jFigureEngine:
             source_chunk=row["source_chunk"],
         )
 
-    def compute_firm_a_figures(self) -> list[FigureWithCitation]:
+    def compute_figures(
+        self,
+        non_ig_method: str = "by_asset_class",
+        gre_method: str = "by_issuer",
+        utilization_display: str = "percent_1dp",
+    ) -> list[FigureWithCitation]:
         """The full Phase 3 output: every figure, each with its
         graph-traversal-derived value AND its citation, or an explicit
         UntraceableFigureError if either is missing - never a silently
-        untraceable number."""
+        untraceable number.
+
+        Firm-agnostic, same relationship to firm identity as
+        metrics.compute_all_figures(): which method each figure uses is
+        entirely a function of the three arguments here. The citation
+        and graph_path lookups below do NOT vary by firm - the
+        underlying graph node (e.g. Aggregate non_ig_exposure) and its
+        SOURCED_FROM edge are identical regardless of which method
+        computed the value that got compared against it; only the
+        traversal that produces the VALUE changes, which is entirely
+        metrics.compute_all_figures()'s concern, not this method's.
+        """
         positions = self.fetch_positions()
         guidelines = self.fetch_guidelines()
-        figures = metrics.compute_all_figures_firm_a(positions, guidelines)
+        figures = metrics.compute_all_figures(
+            positions, guidelines, non_ig_method, gre_method, utilization_display
+        )
 
         # Map each figure id to the (label, key_prop, key_val) whose
         # SOURCED_FROM edge is its citation, and the graph_path string
@@ -235,18 +255,34 @@ class Neo4jFigureEngine:
         return results
 
 
+    def compute_firm_a_figures(self) -> list[FigureWithCitation]:
+        """Firm A's defaults. Three-line wrapper, not a second
+        implementation - same relationship as
+        metrics.compute_all_figures_firm_a()."""
+        return self.compute_figures("by_asset_class", "by_issuer", "percent_1dp")
+
+    def compute_firm_b_figures(self) -> list[FigureWithCitation]:
+        """Firm B's defaults, per firm_B_brief.md."""
+        return self.compute_figures("by_current_rating", "by_parent_issuer", "truncated_bps")
+
+
 if __name__ == "__main__":
+    import argparse
     import os
     import sys
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--firm", choices=["firm_a", "firm_b"], default="firm_a")
+    args = parser.parse_args()
 
     uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
     user = os.environ.get("NEO4J_USER", "neo4j")
     password = os.environ.get("NEO4J_PASSWORD", "interopera_dev_only")
 
-    print(f"Connecting to {uri} as {user} ...")
+    print(f"Connecting to {uri} as {user} (--firm {args.firm}) ...")
     try:
         eng = Neo4jFigureEngine(uri, user, password)
-        results = eng.compute_firm_a_figures()
+        results = eng.compute_firm_a_figures() if args.firm == "firm_a" else eng.compute_firm_b_figures()
         eng.close()
     except Exception as exc:
         print(f"FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)

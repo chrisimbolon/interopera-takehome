@@ -29,9 +29,36 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from src.common.naming import canonical_asset_class
-from src.computation.status import Status, UtilizationKind, determine_status, determine_utilization
+from src.computation.status import (Status, UtilizationKind, determine_status,
+                                    determine_utilization, format_percent_1dp,
+                                    format_truncated_bps)
 from src.ingestion.guidelines import ParsedGuidelines
 from src.ingestion.holdings import Position, compute_nav
+
+# S&P-style rating scale, best to worst. BBB- is the lowest investment-
+# grade rating; BB+ is the highest non-investment-grade ("junk") rating -
+# per firm_B_brief.md's rule 1 ("current rating BB+ or lower"). Index
+# comparison, not string comparison - "BB" > "AAA" alphabetically would
+# be a real bug here if compared as plain strings.
+_RATING_SCALE = [
+    "AAA", "AA+", "AA", "AA-", "A+", "A", "A-",
+    "BBB+", "BBB", "BBB-", "BB+", "BB", "BB-",
+    "B+", "B", "B-", "CCC+", "CCC", "CCC-", "CC", "C", "D",
+]
+_NON_INVESTMENT_GRADE_THRESHOLD = _RATING_SCALE.index("BB+")
+
+
+def _is_non_investment_grade(rating: str | None) -> bool:
+    """True if rating is BB+ or worse. False for None/empty (e.g. Cash,
+    which has no credit rating and doesn't participate in this test) and
+    raises for a rating string not in the known scale, rather than
+    silently treating an unrecognized rating as investment grade."""
+    if not rating:
+        return False
+    if rating not in _RATING_SCALE:
+        raise ValueError(f"unrecognized credit rating: {rating!r}")
+    return _RATING_SCALE.index(rating) >= _NON_INVESTMENT_GRADE_THRESHOLD
+
 
 # Issuers excluded from the single-issuer 8% concentration pool.
 # "government" is explicit in the guideline text ("excluding Singapore
@@ -91,10 +118,31 @@ def _non_ig_by_asset_class(positions: list[Position], nav: Decimal) -> Decimal:
 
 
 def _non_ig_by_current_rating(positions: list[Position], nav: Decimal) -> Decimal:
-    raise NotImplementedError(
-        "Firm B's rating-based non-IG membership is Day 4's job "
-        "(docs/00_project_plan.md) - not implemented yet."
-    )
+    """Firm B: per firm_B_brief.md rule 1, this ADDS fallen angels to
+    Firm A's asset-class set - it does not replace asset-class
+    membership with a pure rating filter. Re-read the brief carefully
+    here: "Any holding whose current rating is below investment grade
+    counts toward the non-IG aggregate, EVEN IF its asset class is
+    Investment Grade Corporate Bonds" - describing an additional
+    inclusion, not a replacement. A pure rating-only filter would
+    produce the WRONG answer here: Harbour ABS Trust (Structured Credit,
+    AAA-rated) would incorrectly drop OUT of the aggregate, since AAA is
+    investment grade - but it must stay in via its asset-class
+    membership, same as Firm A. Verified: this union produces exactly
+    21.0% (Firm A's 15.0% + Marina Bay Resorts' 6.0%), matching
+    docs/00_metric_catalog.md row 8 exactly - a rating-only filter would
+    have produced 15.0% (missing Marina Bay's asset-class-independent
+    membership never even needed to change) or various wrong totals
+    depending on how AAA-rated HY/SC holdings were mishandled.
+    """
+    members = {"High Yield Bonds", "Structured Credit (ABS/MBS)"}
+    total = Decimal("0")
+    for p in positions:
+        in_asset_class_set = canonical_asset_class(p.asset_class) in members
+        in_rating_set = _is_non_investment_grade(p.credit_rating)
+        if in_asset_class_set or in_rating_set:
+            total += p.market_value_sgd
+    return _pct_of_nav(total, nav)
 
 
 NON_IG_METHODS = {
@@ -143,15 +191,32 @@ def _gre_by_issuer(positions: list[Position], nav: Decimal) -> tuple[Decimal, st
 
 
 def _gre_by_parent_issuer(positions: list[Position], nav: Decimal) -> tuple[Decimal, str]:
-    raise NotImplementedError(
-        "Firm B's parent-issuer GRE grouping is Day 4's job "
-        "(docs/00_project_plan.md) - not implemented yet."
-    )
+    """Firm B: GRE issuers sharing a parent_issuer are summed and tested
+    as one group, per firm_B_brief.md rule 2. Falls back to the issuer's
+    own name as the grouping key if parent_issuer is unset (a GRE with
+    no recorded parent groups with itself, i.e. behaves like Firm A's
+    per-issuer test for that one issuer) - documented fallback, not a
+    silent default."""
+    totals: dict[str, Decimal] = {}
+    for p in positions:
+        if p.issuer_type != "GRE":
+            continue
+        group_key = p.parent_issuer or p.issuer_name
+        totals[group_key] = totals.get(group_key, Decimal("0")) + p.market_value_sgd
+    if not totals:
+        raise ValueError("no GRE issuers found")
+    largest_name = max(totals, key=lambda k: totals[k])
+    return _pct_of_nav(totals[largest_name], nav), largest_name
 
 
 GRE_METHODS = {
     "by_issuer": _gre_by_issuer,
     "by_parent_issuer": _gre_by_parent_issuer,
+}
+
+UTILIZATION_FORMATTERS = {
+    "percent_1dp": format_percent_1dp,
+    "truncated_bps": format_truncated_bps,
 }
 
 
@@ -201,12 +266,42 @@ def portfolio_dv01(positions: list[Position]) -> Decimal:
     return weighted * Decimal("0.0001")
 
 
-def compute_all_figures_firm_a(
-    positions: list[Position], guidelines: ParsedGuidelines
+def _format_utilization(util: Decimal | None, method: str) -> str:
+    """Dispatches to the configured display formatter. None ("n/a") is
+    handled uniformly here regardless of method - a floor breach or a
+    "none"-kind metric shows 'n/a' the same way under either firm, per
+    firm_B_brief.md rule 3 only changing the FORMAT of a computed
+    utilization, never whether one exists."""
+    if util is None:
+        return "n/a"
+    if method not in UTILIZATION_FORMATTERS:
+        raise ValueError(f"unknown utilization display method: {method!r}")
+    return UTILIZATION_FORMATTERS[method](util)
+
+
+def compute_all_figures(
+    positions: list[Position],
+    guidelines: ParsedGuidelines,
+    non_ig_method: str = "by_asset_class",
+    gre_method: str = "by_issuer",
+    utilization_display: str = "percent_1dp",
 ) -> list[Figure]:
-    """Computes all 13 report figures using Firm A's default methodology.
-    Pure function - no I/O. This is what gets verified against
-    firm_A_answer_key.xlsx below, byte-exact, all 13 rows."""
+    """Computes all 13 report figures. Firm-agnostic: which methodology
+    each firm uses is entirely a matter of which three string arguments
+    get passed in here - nothing in this function's body branches on
+    "firm". Firm A and Firm B are two calls to the exact same code with
+    different arguments, not two code paths (docs/03_rfc.md SS4).
+
+    Note what does NOT vary by firm here: allocation values (rows 1-7),
+    single-issuer concentration (row 9), liquidity (row 11), duration
+    (row 12), DV01 (row 13) - all use fixed logic regardless of method,
+    because docs/00_metric_catalog.md's own firm-comparison table says
+    those are identical between firms. Only non-IG membership, GRE
+    grouping, and the utilization display format are parameterized -
+    everything else being hardcoded here is intentional, not an
+    oversight, and matches the two-configurable-traversal-points scope
+    established back in docs/00_metric_catalog.md.
+    """
     nav = compute_nav(positions)
     figures: list[Figure] = []
 
@@ -226,13 +321,13 @@ def compute_all_figures_firm_a(
                 limit_max=limit.max_pct,
                 limit_text=f"{limit.min_pct}-{limit.max_pct}%",
                 utilization=util,
-                formatted_utilization=(f"{util.quantize(Decimal('0.1'))}%" if util is not None else "n/a"),
+                formatted_utilization=_format_utilization(util, utilization_display),
                 status=status,
             )
         )
 
     non_ig_cap = guidelines.non_ig_definition.cap_pct
-    non_ig_val = non_ig_exposure(positions, nav, "by_asset_class")
+    non_ig_val = non_ig_exposure(positions, nav, non_ig_method)
     non_ig_status = determine_status(non_ig_val, None, non_ig_cap)
     non_ig_util = determine_utilization(non_ig_val, None, non_ig_cap, "ceiling")
     figures.append(
@@ -246,7 +341,7 @@ def compute_all_figures_firm_a(
             limit_max=non_ig_cap,
             limit_text=f"max {non_ig_cap}%",
             utilization=non_ig_util,
-            formatted_utilization=f"{non_ig_util.quantize(Decimal('0.1'))}%",
+            formatted_utilization=_format_utilization(non_ig_util, utilization_display),
             status=non_ig_status,
         )
     )
@@ -266,13 +361,13 @@ def compute_all_figures_firm_a(
             limit_max=single_issuer_cap,
             limit_text=f"max {single_issuer_cap}%",
             utilization=single_util,
-            formatted_utilization=f"{single_util.quantize(Decimal('0.1'))}%",
+            formatted_utilization=_format_utilization(single_util, utilization_display),
             status=single_status,
         )
     )
 
     gre_cap = next(c.cap_pct for c in guidelines.concentration_limits if c.name == "gre_issuer")
-    gre_val, gre_issuer_name = gre_concentration(positions, nav, "by_issuer")
+    gre_val, gre_issuer_name = gre_concentration(positions, nav, gre_method)
     gre_status = determine_status(gre_val, None, gre_cap)
     gre_util = determine_utilization(gre_val, None, gre_cap, "ceiling")
     figures.append(
@@ -286,7 +381,7 @@ def compute_all_figures_firm_a(
             limit_max=gre_cap,
             limit_text=f"max {gre_cap}%",
             utilization=gre_util,
-            formatted_utilization=f"{gre_util.quantize(Decimal('0.1'))}%",
+            formatted_utilization=_format_utilization(gre_util, utilization_display),
             status=gre_status,
         )
     )
@@ -306,7 +401,7 @@ def compute_all_figures_firm_a(
             limit_max=None,
             limit_text=f"min {liq_floor}%",
             utilization=liq_util,
-            formatted_utilization=f"{liq_util.quantize(Decimal('0.1'))}%",
+            formatted_utilization=_format_utilization(liq_util, utilization_display),
             status=liq_status,
         )
     )
@@ -346,12 +441,41 @@ def compute_all_figures_firm_a(
             limit_max=dv01_limit.limit_max,
             limit_text=f"max SGD {dv01_limit.limit_max:,}/bp",
             utilization=dv01_util,
-            formatted_utilization=f"{dv01_util.quantize(Decimal('0.1'))}%",
+            formatted_utilization=_format_utilization(dv01_util, utilization_display),
             status=dv01_status,
         )
     )
 
     return figures
+
+
+def compute_all_figures_firm_a(
+    positions: list[Position], guidelines: ParsedGuidelines
+) -> list[Figure]:
+    """Backward-compatible wrapper - Firm A's defaults, unchanged
+    behavior from before Day 4. Kept so engine.py and existing callers
+    don't need to change; it's now three lines that call the
+    firm-agnostic function, not a second implementation."""
+    return compute_all_figures(
+        positions, guidelines,
+        non_ig_method="by_asset_class",
+        gre_method="by_issuer",
+        utilization_display="percent_1dp",
+    )
+
+
+def compute_all_figures_firm_b(
+    positions: list[Position], guidelines: ParsedGuidelines
+) -> list[Figure]:
+    """Firm B's defaults, per firm_B_brief.md and configs/firm_b.yaml.
+    Same relationship to compute_all_figures() as the Firm A wrapper
+    above - different arguments, identical function body."""
+    return compute_all_figures(
+        positions, guidelines,
+        non_ig_method="by_current_rating",
+        gre_method="by_parent_issuer",
+        utilization_display="truncated_bps",
+    )
 
 
 if __name__ == "__main__":
@@ -360,8 +484,16 @@ if __name__ == "__main__":
 
     g = parse_guidelines("sample_docs/sample_fund_guidelines.pdf")
     p = parse_holdings("sample_docs/sample_holdings.csv")
-    figures = compute_all_figures_firm_a(p, g)
 
-    print(f"{'Metric':45} {'Value':>10} {'Util':>10} {'Status':>10}")
-    for f in figures:
-        print(f"{f.name:45} {f.formatted_value:>10} {f.formatted_utilization:>10} {f.status.value:>10}")
+    print("=== FIRM A ===")
+    figures_a = compute_all_figures_firm_a(p, g)
+    print(f"{'Metric':45} {'Value':>10} {'Util':>12} {'Status':>10}")
+    for f in figures_a:
+        print(f"{f.name:45} {f.formatted_value:>10} {f.formatted_utilization:>12} {f.status.value:>10}")
+
+    print("\n=== FIRM B ===")
+    figures_b = compute_all_figures_firm_b(p, g)
+    print(f"{'Metric':45} {'Value':>10} {'Util':>12} {'Status':>10}")
+    for f in figures_b:
+        print(f"{f.name:45} {f.formatted_value:>10} {f.formatted_utilization:>12} {f.status.value:>10}")
+

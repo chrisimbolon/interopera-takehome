@@ -114,10 +114,13 @@ def format_percent_1dp(value: Decimal) -> str:
 
 def format_truncated_bps(value: Decimal) -> str:
     """Firm B's utilization display: truncated (not rounded) basis
-    points, e.g. 0.583333... -> '5833 bps'. Truncation, not rounding, is
-    the verified-correct behavior - see docs/00_metric_catalog.md Trap E
-    for the specific value where the two approaches diverge."""
-    bps = value * Decimal(10000)
+    points. Input is percentage-scaled (58.333...% ), matching what
+    determine_utilization() actually returns - NOT a raw fraction. 1% =
+    100 bps, so bps = value * 100: 58.333...% -> 5833.33... -> truncated
+    -> '5833 bps'. Truncation, not rounding, is the verified-correct
+    behavior - see docs/00_metric_catalog.md Trap E for the specific
+    value where the two approaches diverge."""
+    bps = value * Decimal(100)
     truncated = bps.to_integral_value(rounding="ROUND_DOWN")
     return f"{truncated} bps"
 

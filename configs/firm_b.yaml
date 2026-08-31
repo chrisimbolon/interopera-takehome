@@ -1,0 +1,14 @@
+# Firm B - same fund, same holdings, three house-convention overrides
+# from firm_B_brief.md. See docs/00_metric_catalog.md rows 8 and 10 for
+# exactly what each method computes differently from Firm A, and why.
+firm:
+  id: firm_b
+
+non_ig:
+  method: by_current_rating
+
+gre:
+  method: by_parent_issuer
+
+utilization:
+  method: truncated_bps
