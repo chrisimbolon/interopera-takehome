@@ -1,7 +1,18 @@
 services:
   neo4j:
     image: neo4j:5-community
-    container_name: interopera-takehome-neo4j
+    # No explicit container_name - letting Docker Compose auto-namespace
+    # by project folder (its default behavior) means two clones of this
+    # repo in two different directories can run side by side without a
+    # name collision. A hardcoded name here would force every clone to
+    # fight over the exact same container name - found by exactly that
+    # scenario during the Day 7 fresh-clone test, where a genuinely
+    # fresh checkout couldn't start neo4j because the working copy's
+    # container already held the name. Every documented command in this
+    # repo uses `docker compose exec neo4j ...` (the SERVICE name, from
+    # the YAML key below), never the container name directly, so this
+    # is a safe removal - verified by grepping README.md, docs/*.md,
+    # and scripts/*.py for any hardcoded reference before removing it.
     environment:
       - NEO4J_AUTH=neo4j/interopera_dev_only
       - NEO4J_PLUGINS=[]
@@ -18,7 +29,7 @@ services:
 
   app:
     build: .
-    container_name: interopera-takehome-app
+    # Same reasoning as neo4j above - no hardcoded container_name.
     depends_on:
       neo4j:
         condition: service_healthy
