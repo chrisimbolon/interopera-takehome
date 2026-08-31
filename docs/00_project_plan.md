@@ -23,7 +23,34 @@ state. Both are folded in below. No day introduces work outside what the brief s
 | **4** | Phase 4 | **Complete, verified against a live Neo4j, both firms.** `configs/firm_b.yaml` (fallen-angel rating rule, parent-issuer GRE grouping, truncated-bps display) validated by the same Pydantic schema from Day 3 — zero schema changes needed, its enum-constrained `method` fields already covered Firm B's values. `metrics.py`'s two `NotImplementedError` stubs from Day 3 filled in with real logic: rating-based non-IG (a *union* with Firm A's asset-class set, not a replacement — re-reading `firm_B_brief.md` closely mattered here, a naive rating-only filter would have wrongly dropped an AAA-rated Structured Credit holding out of the aggregate) and parent-issuer GRE grouping. **Checkpoint passed three times: offline (both firms computed side by side, all 3 documented differences matched exactly, all 10 identical figures stayed identical); live via `--firm firm_a`/`--firm firm_b` (initially a hardcoded method-selection ternary in `engine.py`'s CLI — caught by checking, not assumed clean, and replaced with an actual `configs/{firm}.yaml` load through `rules.load_firm_config()`); and structurally (`grep`'d the entire computation core for firm-identity branching — zero, confirmed on both the pre- and post-fix versions).** One more real bug caught before it shipped: `format_truncated_bps` was written assuming a raw fraction input, inconsistent with `determine_utilization`'s percentage-scaled output since Day 3's fix — caught and fixed before Firm B ever exercised that code path, verified against the exact `58.333...% → 5833 bps` trap case. |
 | **5** | Phase 5 | **Complete, verified against a live Neo4j, both firms.** `src/reconciliation/traceability.py` (`verify_figure_traceability()`, Gate 2), `src/reconciliation/reconciler.py` (per-figure expected/actual/delta/pass-fail), `src/audit/logger.py` (append-only, hash-chained SQLite), `scripts/reconcile.py` (the Phase 5 orchestration). **Checkpoint passed live, both firms: `python3 scripts/reconcile.py --firm firm_a` and `--firm firm_b` each report 13/13 figures traceable, 13/13 rows reconciled, audit chain valid, `OVERALL: PASS`.** One real bug caught between the offline pass and this live run: `python3 scripts/reconcile.py` (direct invocation) raised `ModuleNotFoundError: No module named 'src'` — Python resolves direct script invocation's import path from the script's own folder, not the project root, unlike every other module in this repo which had only ever been run via `-m`. Fixed by having the script locate its own project root and prepend it to `sys.path`; verified working both from the project root and invoked by full path from `/tmp`. One deliberate scope limit carried through unchanged: Firm B's utilization is checked by *format shape* only, not an exact expected bps value — see `reconciler.py`'s module docstring for why reformatting Firm A's already-rounded answer-key percentage would compound rounding error. |
 | **6** | Phase 2 (LLM) + narrative | **Complete, both LLM paths verified live.** `src/narrative/firewall.py` (the number firewall, 8 offline tests including two that caught a real regex bug, plus a documented scope limit found reviewing live output — it checks the *number set*, not number-to-metric attribution). `src/reporting/excel.py` (real populated file, all 13 rows verified). `src/extraction/` (`schemas.py`, `prompts.py`, `gate1.py` all pure/tested; `llm.py` anchored to a concrete use case: re-extracting the Interest Rate Sensitivity limit Day 2's parser gave up on). `src/narrative/generator.py` enforces the firewall on every call. Switched from Anthropic to **Google Gemini** (`google-genai` SDK) mid-day, budget-driven — Anthropic's API needed a paid credit purchase, Gemini's free tier didn't; confined to exactly two files, as designed, everything else needed zero changes. **Live results: extraction correctly identified 4 of 5 fields from deliberately scrambled source text, self-reported low confidence (0.3) on the one it got wrong rather than guessing, and Gate 1 correctly held it for review rather than auto-approving. Narrative generation passed the firewall on both firms, with every cited number independently verified against the correct metric — not just "no fabricated numbers" but "no misattributed ones either." A genuine adversarial test (a `Figure.name` field crafted with a prompt-injection attempt) was ignored entirely by the model, not just caught after the fact.** Bugs caught before they shipped, none by luck: the firewall's regex, a broken exception construct, an import-ordering bug hiding a clear error behind `ModuleNotFoundError`, a live 404 on a retired model name, and a dating-back packaging gap (two `__init__.py` files from Day 3/5 never actually committed). |
-| **7** | Wrap-up | **In progress, real ground covered — including one important false-positive caught.** Single-command entrypoint (`scripts/reconcile.py`) verified live, both firms, `OVERALL: PASS`. Fresh-checkout test done in this sandbox (`git clone --local` into a genuinely empty directory, full regression passes). **Determinism: fully confirmed live.** `scripts/verify_determinism.py --live` — both offline and live paths byte-identical across two independent runs, both firms; the live path never touches the graph builder, so this result is trustworthy on its own terms. **Missing-provenance: first attempt invalidated, caught before being trusted.** Deleted a live `SOURCED_FROM` edge, ran `scripts/reconcile.py --firm firm_a`, got `OVERALL: PASS` — but tracing the output showed `reconcile.py`'s own first step (its idempotent graph rebuild) silently re-created the exact edge that had just been deleted, *before* the traceability check ever ran. The test technically passed but proved "the graph heals itself," not "the system detects a missing citation" — a real, subtle interaction between two things built the same day, not a flaw in either one alone. Corrected: `test_provenance_live.py` calls `Neo4jFigureEngine` directly, bypassing `reconcile.py`'s auto-rebuild entirely, so it observes the graph's actual current state — handed off, not yet run for real. `README.md` rewritten with real, verified content. **Genuinely still open:** the corrected provenance test above, and the user's own truly-fresh-environment test (new directory, no `.venv`, starting from zero — stricter than the git-clone-only proxy done here). Bonus items untouched — gated on this list closing out first. |
+| **7** | Wrap-up | **Core checklist fully complete — every item genuinely live-verified, including the one this sandbox couldn't do itself.** Single-command entrypoint, determinism (offline and live), and missing-provenance (corrected and confirmed) all proven against the real running system. **The final piece: a genuinely fresh environment, real git clone from GitHub into a brand-new directory, fresh venv, `pip install` from scratch, Docker container under a newly-fixed auto-namespaced name — `python3 scripts/reconcile.py --firm firm_a`/`--firm firm_b`, both `OVERALL: PASS`, matching every prior verified run exactly.** One real portability bug found and fixed along the way: `docker-compose.yml` hardcoded `container_name` on both services, which overrides Docker's default per-folder auto-namespacing — meant two clones of this repo could never run side by side, exactly the scenario a fresh-clone test creates. Removed from both services after confirming (by grep) that nothing documented or tested this week depended on the literal name — every command uses `docker compose exec neo4j`, the *service* name, not the container name. Verified as a real fix, not just a guess: the working copy and the fresh clone genuinely ran with different auto-generated container names side by side, only blocked afterward by an unrelated, expected port conflict (both mapping to host `7474`/`7687`) that has nothing to do with the naming fix. `README.md` real. Bonus items are the only thing left, now legitimately unblocked. |
+
+## Bonus items (capped +5 total, per the brief)
+
+All three built, sized appropriately for a capped bonus rather than gold-plated:
+
+- **Config mini-DSL live preview** (`scripts/preview_config.py`) — translates a config's raw YAML
+  method names into plain English, then shows a live numeric diff against Firm A's baseline.
+  **Fully tested offline**, three real cases: `firm_b.yaml` correctly flags exactly the 2
+  documented differences, `firm_a.yaml` correctly shows zero changes against its own baseline, and
+  a deliberately typo'd method name fails with a clear, actionable error rather than a raw
+  traceback.
+- **Global/local retrieval for the narrative layer** (`src/narrative/retrieval.py`) — a compact
+  global summary (status counts) plus local detail only on figures that actually need narrating
+  (`BREACH`/`AT_LIMIT`), replacing a flat 13-row dump regardless of whether anything was
+  noteworthy. **Fully tested offline** against synthetic cases and real Firm A figures — correctly
+  isolates exactly the Cash breach and the Changi Logistics at-limit case, nothing else. Safety
+  explicitly re-verified: the number firewall still validates against the full unfiltered figure
+  list, not the narrowed local context — confirmed by checking the actual call site, not assumed.
+- **Reconciliation/replay viewer** (`scripts/replay.py`) — given a figure ID, shows its value,
+  graph path, citation, delta vs. the answer key, and which config method (if any) produced it.
+  **Fully verified live**, both firms: `aggregate::non_ig_exposure --firm firm_b` correctly showed
+  21.0% BREACH, `10500 bps` utilization (hand-verified: 21/20×100=105.0%, ×100=10500, truncated),
+  the right citation (`sample_fund_guidelines.pdf` p.2), `MATCH` against the answer key, and
+  correct attribution to `non_ig.method='by_current_rating'`. `concentration::gre --firm firm_a`
+  equally correct (7.0% OK, 58.3% utilization, right citation, `MATCH`, attributed to
+  `gre.method='by_issuer'`). Every field checked by hand against known-correct math, not just
+  eyeballed as "looks right".
 
 ## Why the checkpoints sit where they do
 
@@ -97,12 +124,16 @@ interopera-takehome/
 │   │   └── excel.py              # receives ComputedFigure[] only, never raw LLM output
 │   └── narrative/                # Day 6
 │       ├── generator.py          # LLM commentary generation, enforces the firewall on every call
-│       └── firewall.py           # the number firewall itself - pure logic, no LLM dependency
+│       ├── firewall.py           # the number firewall itself - pure logic, no LLM dependency
+│       └── retrieval.py          # bonus: global/local retrieval for the narrative prompt
 ├── configs/
 │   ├── firm_a.yaml
 │   └── firm_b.yaml
 ├── scripts/
-│   └── reconcile.py              # the single entrypoint: graph build → traversal → reconcile → audit
+│   ├── reconcile.py              # the single entrypoint: graph build → traversal → reconcile → audit
+│   ├── verify_determinism.py     # constraint 1's proof: two runs, byte-identical JSON
+│   ├── preview_config.py         # bonus: config mini-DSL live preview
+│   └── replay.py                 # bonus: reconciliation/replay viewer
 ├── docker-compose.yml            # Neo4j + app service
 ├── requirements.txt
 └── README.md                     # single documented startup command
@@ -128,9 +159,13 @@ Seven real divergences from the original Day 1 sketch, reconciled here rather th
    to the code they verify and run with zero extra setup (`python3 -m src.audit.logger`), which
    fit this week's actual working rhythm (write, verify immediately, commit) better than a
    separate suite would have. Worth reconsidering for Day 7 polish if time allows, not before.
-6. **`scripts/` only has `reconcile.py` so far.** `ingest.py`, `run_report.py`, `verify_audit.py`
-   were always Day 6/7 concerns (LLM ingestion entrypoint, final report export, standalone audit
-   verification) — not missing, just not due yet.
+6. **`scripts/` grew to four files** (`reconcile.py`, `verify_determinism.py`, `preview_config.py`,
+   `replay.py`), not the originally-sketched `ingest.py`/`run_report.py`/`verify_audit.py`. Those
+   three were always placeholders for concerns that ended up folded into `reconcile.py` itself
+   (graph ingestion is now `reconcile.py`'s own first step; audit verification is its own last
+   step) rather than needing separate entrypoints — `ingest.py` and `run_report.py`
+   specifically remain unbuilt, since the LLM-extraction and final-report-export flows they'd have
+   covered never grew large enough on their own to need a dedicated script.
 7. **`src/narrative/firewall.py` is its own module, not folded into `generator.py`.** The original
    sketch's one-line comment ("LLM commentary + number firewall") implied one file; in practice the
    firewall is pure text-processing logic with zero LLM dependency, while `generator.py` is the

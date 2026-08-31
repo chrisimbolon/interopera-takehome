@@ -65,9 +65,21 @@ class NarrativeResult:
 def _build_figures_summary(figures: list[Figure]) -> str:
     """Formats figures as plain text for the prompt - deliberately NOT
     passing raw Figure objects or any computation capability to the
-    model, just their already-formatted string values."""
-    lines = []
-    for f in figures:
+    model, just their already-formatted string values.
+
+    Structured as global summary + local detail (src/narrative/
+    retrieval.py) rather than a flat dump of every figure regardless of
+    whether it's noteworthy - a fully-compliant fund and a fund with
+    three breaches used to produce the same prompt shape; now the
+    model gets oriented by the aggregate picture first, then detail
+    only on what actually needs narrating."""
+    from src.narrative.retrieval import global_summary, local_context
+
+    summary_line = global_summary(figures)
+    noteworthy = local_context(figures)
+
+    lines = [f"Overview: {summary_line}", "", "Detail on the figures that need commentary:"]
+    for f in noteworthy:
         lines.append(
             f"- {f.name}: value={f.formatted_value}, limit={f.limit_text}, "
             f"utilization={f.formatted_utilization}, status={f.status.value}"
