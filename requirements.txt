@@ -12,8 +12,12 @@ pdfplumber>=0.11
 # Excel read/write
 openpyxl>=3.1
 
-# LLM (Day 6 — guideline extraction assist + narrative layer only)
-anthropic>=0.34
+# google-genai, not anthropic: budget-driven choice, Gemini's free tier
+# (Google AI Studio, no credit card) has no ongoing cost, unlike the
+# Anthropic API which requires a paid credit purchase with no free
+# tier as of this writing. Explicitly permitted by the assignment
+# brief ("any frontier API"). See src/extraction/llm.py's docstring.
+google-genai>=0.3
 
 # Testing
 pytest>=8.2

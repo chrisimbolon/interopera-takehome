@@ -170,9 +170,9 @@ none of them.
 | Domain models & config validation | Pydantic v2 | Enum-constrained `method` fields make it structurally impossible for a firm config to invent new logic — the type-system enforcement of "config selects, never defines" |
 | Config format | YAML (`PyYAML`) parsed into Pydantic models | Human-readable, diffable |
 | Holdings processing | Stdlib `csv` + `decimal.Decimal` — not pandas | Pandas defaults numeric columns to `float64`, which conflicts with the "never float in a reported figure" numeric policy (`docs/00_metric_catalog.md`); 13 rows don't need a dataframe library |
-| PDF extraction | PyMuPDF (`fitz`) | Reliable page-level text extraction with page numbers, feeding `source_page` provenance directly |
+| PDF extraction | pdfplumber (not PyMuPDF as originally planned) | PyMuPDF requires a pip install this sandbox has no network access for. Tested pdfplumber's plain `page.extract_text()` against the real guidelines PDF: reliable page-level text with page numbers for `source_page` provenance. Its own `extract_tables()` was also tested and rejected — produces corrupted cell boundaries on this document's allocation table; regex over the clean plain text proved more reliable, verified by direct comparison |
 | Excel read/write | openpyxl | Already verified against the real answer key and report template |
-| LLM (Day 6 only) | Anthropic Claude via the `anthropic` SDK, structured/tool-use output matched to a Pydantic schema | Structured entities out, not prose; brief permits any frontier API |
+| LLM (Day 6 only) | Google Gemini via the `google-genai` SDK, native Pydantic `response_schema` | Budget-driven switch from an original Anthropic choice — Gemini's free tier (Google AI Studio, no card) has no ongoing cost, brief explicitly permits any frontier API. Structured entities out, not prose |
 | CLI | Typer | Auto-generated `--help` and clean subcommands (`ingest`, `compute`, `reconcile`, `export`) support the "clone to result in minutes" README requirement |
 | Hashing (audit chain) | Stdlib `hashlib` (SHA-256) | No dependency needed for hash-chaining log entries |
 | Testing | pytest | Matches the `tests/` layout in `docs/00_project_plan.md` |

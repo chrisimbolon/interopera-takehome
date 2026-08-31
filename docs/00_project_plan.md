@@ -22,7 +22,7 @@ state. Both are folded in below. No day introduces work outside what the brief s
 | **3** | Phase 3 | **Complete, verified against a live Neo4j.** `src/computation/status.py` (the `BREACH`/`AT_LIMIT`/`OK` policy plus utilization convention, tested against 10 real cases), `metrics.py` (all 13 report rows, pure Decimal arithmetic), `rules.py` (Pydantic-validated Firm config, enum-constrained methods), `engine.py` (the real figure assembler — Neo4j proves the traversal, Python does the arithmetic). **Checkpoint passed twice: first offline, diffed programmatically against the real `firm_A_answer_key.xlsx` file, all 13 rows byte-exact; then live, `engine.py` against the actual running Neo4j container, same 13/13 match, every figure with a resolved citation.** Two real issues found and fixed along the way: `determine_utilization` initially returned a raw ratio instead of a percentage (caught immediately by the offline test); and after adding structured `limit_min`/`limit_max` to `RiskLimit`, the live graph still had the old schema until `--write` was re-run — a reminder that any `builder.py` change needs a graph re-sync before `engine.py` can see it. |
 | **4** | Phase 4 | **Complete, verified against a live Neo4j, both firms.** `configs/firm_b.yaml` (fallen-angel rating rule, parent-issuer GRE grouping, truncated-bps display) validated by the same Pydantic schema from Day 3 — zero schema changes needed, its enum-constrained `method` fields already covered Firm B's values. `metrics.py`'s two `NotImplementedError` stubs from Day 3 filled in with real logic: rating-based non-IG (a *union* with Firm A's asset-class set, not a replacement — re-reading `firm_B_brief.md` closely mattered here, a naive rating-only filter would have wrongly dropped an AAA-rated Structured Credit holding out of the aggregate) and parent-issuer GRE grouping. **Checkpoint passed three times: offline (both firms computed side by side, all 3 documented differences matched exactly, all 10 identical figures stayed identical); live via `--firm firm_a`/`--firm firm_b` (initially a hardcoded method-selection ternary in `engine.py`'s CLI — caught by checking, not assumed clean, and replaced with an actual `configs/{firm}.yaml` load through `rules.load_firm_config()`); and structurally (`grep`'d the entire computation core for firm-identity branching — zero, confirmed on both the pre- and post-fix versions).** One more real bug caught before it shipped: `format_truncated_bps` was written assuming a raw fraction input, inconsistent with `determine_utilization`'s percentage-scaled output since Day 3's fix — caught and fixed before Firm B ever exercised that code path, verified against the exact `58.333...% → 5833 bps` trap case. |
 | **5** | Phase 5 | **Complete, verified against a live Neo4j, both firms.** `src/reconciliation/traceability.py` (`verify_figure_traceability()`, Gate 2), `src/reconciliation/reconciler.py` (per-figure expected/actual/delta/pass-fail), `src/audit/logger.py` (append-only, hash-chained SQLite), `scripts/reconcile.py` (the Phase 5 orchestration). **Checkpoint passed live, both firms: `python3 scripts/reconcile.py --firm firm_a` and `--firm firm_b` each report 13/13 figures traceable, 13/13 rows reconciled, audit chain valid, `OVERALL: PASS`.** One real bug caught between the offline pass and this live run: `python3 scripts/reconcile.py` (direct invocation) raised `ModuleNotFoundError: No module named 'src'` — Python resolves direct script invocation's import path from the script's own folder, not the project root, unlike every other module in this repo which had only ever been run via `-m`. Fixed by having the script locate its own project root and prepend it to `sys.path`; verified working both from the project root and invoked by full path from `/tmp`. One deliberate scope limit carried through unchanged: Firm B's utilization is checked by *format shape* only, not an exact expected bps value — see `reconciler.py`'s module docstring for why reformatting Firm A's already-rounded answer-key percentage would compound rounding error. |
-| **6** | Phase 2 (LLM) + narrative | *Only now* does the LLM enter: `src/extraction/` plugs into the same ingestion boundary from Day 2 — PDF → chunks → structured extraction → validation → Gate 1 human review. `src/narrative/generator.py` writes commentary over already-approved figures (read-only) and runs the number firewall. `src/reporting/excel.py` populates `report_template.xlsx` from `ComputedFigure[]` only, never from LLM output. |
+| **6** | Phase 2 (LLM) + narrative | **Core logic complete and tested to the fullest extent possible without network access — the actual API calls have never been made.** `src/narrative/firewall.py` (the number firewall, 8 tests including two that caught a real regex bug where a bare 4-digit number was invisible to the tokenizer entirely). `src/reporting/excel.py` (populates `report_template.xlsx` from `Figure` objects only — the function signature never even accepts LLM output as an argument; generated and verified a real populated file, all 13 rows). `src/extraction/` (`schemas.py`, `prompts.py`, `gate1.py` — all pure/testable; `llm.py` is the actual API wrapper, anchored to a concrete use case: re-extracting the Interest Rate Sensitivity risk limit Day 2's deterministic parser explicitly gave up on, not a generic redundant demo). `src/narrative/generator.py` enforces the firewall on every generation — a narrative that fails is never returned to the caller. Three real bugs caught while building, none by luck: the firewall's regex, a broken exception construct (`NarrativeRejectedError.__class__.__base__(...)`, confirmed to raise the wrong `TypeError` entirely before being fixed), and an import-ordering bug in both `llm.py` and `generator.py` where `import anthropic` ran before the API-key check, hiding the clear error behind an unrelated `ModuleNotFoundError` in any environment without the SDK installed. Also found and fixed a dating-back gap unrelated to Day 6 itself: `src/computation/__init__.py` and `src/reconciliation/__init__.py` existed on disk since Day 3 and Day 5 but were never actually committed — Python's implicit namespace packages had been quietly papering over it. **What's still genuinely unverified: every function that calls the Anthropic API. No network access in this environment at all, so this is the one component this week that couldn't even be import-checked against the real SDK, only syntax-checked.** |
 | **7** | Wrap-up | Clean-clone `docker compose up` test. Determinism test (two Firm A runs, byte-identical JSON). Firewall injection test, missing-provenance test, audit-immutability test. README with a runnable evaluation-commands section. Bonus items only if Phases 3–5 are solid. |
 
 ## Why the checkpoints sit where they do
@@ -50,7 +50,7 @@ Day 7's bonus scope, never by rushing Day 3 or Day 4.
 ## Proposed repository structure
 
 **Updated to match what's actually on disk as of end of Day 5**, not the original Day 1 sketch —
-six real divergences accumulated over the week, listed below the tree rather than left silently
+seven real divergences accumulated over the week, listed below the tree rather than left silently
 unreconciled.
 
 ```
@@ -75,9 +75,10 @@ interopera-takehome/
 │   ├── common/                   # cross-module shared logic (see divergence #1 below)
 │   │   └── naming.py
 │   ├── extraction/               # Day 6 — LLM-assisted structuring, same boundary as ingestion/
-│   │   ├── llm.py
-│   │   ├── schemas.py
-│   │   └── prompts.py
+│   │   ├── llm.py                # the actual Claude API call
+│   │   ├── schemas.py            # Pydantic extraction output schema
+│   │   ├── prompts.py            # prompt builder, pure string templating
+│   │   └── gate1.py              # confidence-threshold auto-pass vs. human review
 │   ├── graph/
 │   │   ├── schema.cypher         # constraints + indexes
 │   │   ├── builder.py            # candidate graph → Gate 1 → Neo4j commit
@@ -95,7 +96,8 @@ interopera-takehome/
 │   ├── reporting/                # Day 6 — populates report_template.xlsx
 │   │   └── excel.py              # receives ComputedFigure[] only, never raw LLM output
 │   └── narrative/                # Day 6
-│       └── generator.py          # LLM commentary + number firewall
+│       ├── generator.py          # LLM commentary generation, enforces the firewall on every call
+│       └── firewall.py           # the number firewall itself - pure logic, no LLM dependency
 ├── configs/
 │   ├── firm_a.yaml
 │   └── firm_b.yaml
@@ -106,7 +108,7 @@ interopera-takehome/
 └── README.md                     # single documented startup command
 ```
 
-Six real divergences from the original Day 1 sketch, reconciled here rather than left stale:
+Seven real divergences from the original Day 1 sketch, reconciled here rather than left stale:
 
 1. **`src/common/naming.py` — never planned, added Day 3.** Extracted after the `BELONGS_TO` bug
    (commit `d098c92`) once `metrics.py` needed the identical CSV-to-PDF asset-class reconciliation
@@ -129,6 +131,12 @@ Six real divergences from the original Day 1 sketch, reconciled here rather than
 6. **`scripts/` only has `reconcile.py` so far.** `ingest.py`, `run_report.py`, `verify_audit.py`
    were always Day 6/7 concerns (LLM ingestion entrypoint, final report export, standalone audit
    verification) — not missing, just not due yet.
+7. **`src/narrative/firewall.py` is its own module, not folded into `generator.py`.** The original
+   sketch's one-line comment ("LLM commentary + number firewall") implied one file; in practice the
+   firewall is pure text-processing logic with zero LLM dependency, while `generator.py` is the
+   actual API call — splitting them meant the firewall could be fully tested offline (8 cases,
+   including two that caught a real regex bug) independent of whether a live API was ever reachable,
+   which mattered a lot given this sandbox never had network access at all for Day 6.
 
 Each top-level `src/` folder still maps to one architectural boundary from `docs/03_rfc.md`:
 `graph/` and `computation/rules.py` are the two things the rest of `computation/` reads;
