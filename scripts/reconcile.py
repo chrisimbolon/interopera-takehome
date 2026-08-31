@@ -37,7 +37,8 @@ from pathlib import Path
 # directly per its whole purpose as an entrypoint folder, so the script
 # takes responsibility for finding the project root itself rather than
 # requiring the caller to know about -m module syntax.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.audit.logger import AuditLogger
 from src.computation.engine import Neo4jFigureEngine, UntraceableFigureError
@@ -45,8 +46,8 @@ from src.reconciliation.reconciler import (print_report, reconcile_firm_a,
                                            reconcile_firm_b)
 from src.reconciliation.traceability import verify_figure_traceability
 
-ANSWER_KEY_PATH = "sample_docs/firm_A_answer_key.xlsx"
-AUDIT_DB_PATH = "audit.db"
+ANSWER_KEY_PATH = PROJECT_ROOT / "sample_docs/firm_A_answer_key.xlsx"
+AUDIT_DB_PATH = PROJECT_ROOT / "audit.db"
 
 
 def run(firm: str, run_id: str) -> bool:
@@ -73,8 +74,8 @@ def run(firm: str, run_id: str) -> bool:
         from src.ingestion.guidelines import parse_guidelines
         from src.ingestion.holdings import parse_holdings
 
-        parsed_guidelines = parse_guidelines("sample_docs/sample_fund_guidelines.pdf")
-        positions = parse_holdings("sample_docs/sample_holdings.csv")
+        parsed_guidelines = parse_guidelines(PROJECT_ROOT / "sample_docs/sample_fund_guidelines.pdf")
+        positions = parse_holdings(PROJECT_ROOT / "sample_docs/sample_holdings.csv")
         plan = build_graph_plan(parsed_guidelines, positions)
 
         writer = Neo4jGraphWriter(uri, user, password)
