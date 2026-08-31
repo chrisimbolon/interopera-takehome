@@ -80,20 +80,37 @@ def _normalize_number(token: str) -> str:
     return stripped
 
 
-def build_allowed_number_set(figures: list[Figure]) -> set[str]:
+def build_allowed_number_set(
+    figures: list[Figure], additional_numbers: set[str] | None = None
+) -> set[str]:
     """Every number that legitimately appears anywhere in the given
     figures - value, utilization, and limit text. A narrative is allowed
-    to mention any of these; anything else is unaccounted for."""
+    to mention any of these; anything else is unaccounted for.
+
+    additional_numbers: numbers that are legitimate but don't come from
+    any single figure's fields - specifically, the status-count
+    aggregates (total/OK/AT_LIMIT/BREACH counts) that
+    src/narrative/retrieval.py's global_summary() computes and puts
+    into the prompt. Found via a real live-test failure: the firewall
+    was rejecting narratives that faithfully paraphrased our OWN
+    summary sentence, because a count like '11 OK out of 13' isn't a
+    property of any individual figure. These numbers are deterministic
+    and non-fabricated - computed by our own code, not the LLM - so
+    they belong in the allowed set exactly like any figure's value
+    does, just sourced differently.
+    """
     allowed: set[str] = set()
     for f in figures:
         for source_text in (f.formatted_value, f.formatted_utilization, f.limit_text):
             if source_text:
                 for tok in extract_numeric_tokens(source_text):
                     allowed.add(_normalize_number(tok))
+    if additional_numbers:
+        allowed |= additional_numbers
     return allowed
 
 
-def check_narrative_firewall(narrative_text: str, figures: list[Figure]) -> FirewallResult:
+def check_narrative_firewall(narrative_text: str, figures: list[Figure], additional_allowed_numbers: set[str] | None = None) -> FirewallResult:
     """The actual check. Every numeric token in narrative_text must
     either normalize to a number present in the given figures, or be a
     standalone 4-digit year (1900-2099). Anything else is a violation -
@@ -113,7 +130,7 @@ def check_narrative_firewall(narrative_text: str, figures: list[Figure]) -> Fire
     introducing more false positives than the narrow number-set check
     it would replace. Left as a stated limit rather than a fragile fix.
     """
-    allowed = build_allowed_number_set(figures)
+    allowed = build_allowed_number_set(figures, additional_allowed_numbers)
     violations = []
 
     for match in _NUMBER_TOKEN_RE.finditer(narrative_text):

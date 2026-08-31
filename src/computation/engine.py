@@ -38,6 +38,7 @@ class Citation:
     source_document: str
     source_page: int | None
     source_chunk: str
+    passage_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,7 @@ class Neo4jFigureEngine:
             source_document=row["source_document"],
             source_page=row["source_page"],
             source_chunk=row["source_chunk"],
+            passage_summary=row.get("passage_summary"),
         )
 
     def compute_figures(

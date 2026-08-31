@@ -23,7 +23,82 @@ state. Both are folded in below. No day introduces work outside what the brief s
 | **4** | Phase 4 | **Complete, verified against a live Neo4j, both firms.** `configs/firm_b.yaml` (fallen-angel rating rule, parent-issuer GRE grouping, truncated-bps display) validated by the same Pydantic schema from Day 3 — zero schema changes needed, its enum-constrained `method` fields already covered Firm B's values. `metrics.py`'s two `NotImplementedError` stubs from Day 3 filled in with real logic: rating-based non-IG (a *union* with Firm A's asset-class set, not a replacement — re-reading `firm_B_brief.md` closely mattered here, a naive rating-only filter would have wrongly dropped an AAA-rated Structured Credit holding out of the aggregate) and parent-issuer GRE grouping. **Checkpoint passed three times: offline (both firms computed side by side, all 3 documented differences matched exactly, all 10 identical figures stayed identical); live via `--firm firm_a`/`--firm firm_b` (initially a hardcoded method-selection ternary in `engine.py`'s CLI — caught by checking, not assumed clean, and replaced with an actual `configs/{firm}.yaml` load through `rules.load_firm_config()`); and structurally (`grep`'d the entire computation core for firm-identity branching — zero, confirmed on both the pre- and post-fix versions).** One more real bug caught before it shipped: `format_truncated_bps` was written assuming a raw fraction input, inconsistent with `determine_utilization`'s percentage-scaled output since Day 3's fix — caught and fixed before Firm B ever exercised that code path, verified against the exact `58.333...% → 5833 bps` trap case. |
 | **5** | Phase 5 | **Complete, verified against a live Neo4j, both firms.** `src/reconciliation/traceability.py` (`verify_figure_traceability()`, Gate 2), `src/reconciliation/reconciler.py` (per-figure expected/actual/delta/pass-fail), `src/audit/logger.py` (append-only, hash-chained SQLite), `scripts/reconcile.py` (the Phase 5 orchestration). **Checkpoint passed live, both firms: `python3 scripts/reconcile.py --firm firm_a` and `--firm firm_b` each report 13/13 figures traceable, 13/13 rows reconciled, audit chain valid, `OVERALL: PASS`.** One real bug caught between the offline pass and this live run: `python3 scripts/reconcile.py` (direct invocation) raised `ModuleNotFoundError: No module named 'src'` — Python resolves direct script invocation's import path from the script's own folder, not the project root, unlike every other module in this repo which had only ever been run via `-m`. Fixed by having the script locate its own project root and prepend it to `sys.path`; verified working both from the project root and invoked by full path from `/tmp`. One deliberate scope limit carried through unchanged: Firm B's utilization is checked by *format shape* only, not an exact expected bps value — see `reconciler.py`'s module docstring for why reformatting Firm A's already-rounded answer-key percentage would compound rounding error. |
 | **6** | Phase 2 (LLM) + narrative | **Complete, both LLM paths verified live.** `src/narrative/firewall.py` (the number firewall, 8 offline tests including two that caught a real regex bug, plus a documented scope limit found reviewing live output — it checks the *number set*, not number-to-metric attribution). `src/reporting/excel.py` (real populated file, all 13 rows verified). `src/extraction/` (`schemas.py`, `prompts.py`, `gate1.py` all pure/tested; `llm.py` anchored to a concrete use case: re-extracting the Interest Rate Sensitivity limit Day 2's parser gave up on). `src/narrative/generator.py` enforces the firewall on every call. Switched from Anthropic to **Google Gemini** (`google-genai` SDK) mid-day, budget-driven — Anthropic's API needed a paid credit purchase, Gemini's free tier didn't; confined to exactly two files, as designed, everything else needed zero changes. **Live results: extraction correctly identified 4 of 5 fields from deliberately scrambled source text, self-reported low confidence (0.3) on the one it got wrong rather than guessing, and Gate 1 correctly held it for review rather than auto-approving. Narrative generation passed the firewall on both firms, with every cited number independently verified against the correct metric — not just "no fabricated numbers" but "no misattributed ones either." A genuine adversarial test (a `Figure.name` field crafted with a prompt-injection attempt) was ignored entirely by the model, not just caught after the fact.** Bugs caught before they shipped, none by luck: the firewall's regex, a broken exception construct, an import-ordering bug hiding a clear error behind `ModuleNotFoundError`, a live 404 on a retired model name, and a dating-back packaging gap (two `__init__.py` files from Day 3/5 never actually committed). |
-| **7** | Wrap-up | **Core checklist fully complete — every item genuinely live-verified, including the one this sandbox couldn't do itself.** Single-command entrypoint, determinism (offline and live), and missing-provenance (corrected and confirmed) all proven against the real running system. **The final piece: a genuinely fresh environment, real git clone from GitHub into a brand-new directory, fresh venv, `pip install` from scratch, Docker container under a newly-fixed auto-namespaced name — `python3 scripts/reconcile.py --firm firm_a`/`--firm firm_b`, both `OVERALL: PASS`, matching every prior verified run exactly.** One real portability bug found and fixed along the way: `docker-compose.yml` hardcoded `container_name` on both services, which overrides Docker's default per-folder auto-namespacing — meant two clones of this repo could never run side by side, exactly the scenario a fresh-clone test creates. Removed from both services after confirming (by grep) that nothing documented or tested this week depended on the literal name — every command uses `docker compose exec neo4j`, the *service* name, not the container name. Verified as a real fix, not just a guess: the working copy and the fresh clone genuinely ran with different auto-generated container names side by side, only blocked afterward by an unrelated, expected port conflict (both mapping to host `7474`/`7687`) that has nothing to do with the naming fix. `README.md` real. Bonus items are the only thing left, now legitimately unblocked. |
+| **7** | Wrap-up | **Core checklist fully complete — every item genuinely live-verified, including the one this sandbox couldn't do itself.** Single-command entrypoint, determinism (offline and live), and missing-provenance (corrected,
+confirmed, and — found in a later final review — promoted from a gitignored scratch file to a real
+committed script, `scripts/verify_provenance.py`, since the pointer to "the exact steps" previously
+led nowhere for anyone outside this chat session) all proven against the real running system. **The final piece: a genuinely fresh environment, real git clone from GitHub into a brand-new directory, fresh venv, `pip install` from scratch, Docker container under a newly-fixed auto-namespaced name — `python3 scripts/reconcile.py --firm firm_a`/`--firm firm_b`, both `OVERALL: PASS`, matching every prior verified run exactly.** One real portability bug found and fixed along the way: `docker-compose.yml` hardcoded `container_name` on both services, which overrides Docker's default per-folder auto-namespacing — meant two clones of this repo could never run side by side, exactly the scenario a fresh-clone test creates. Removed from both services after confirming (by grep) that nothing documented or tested this week depended on the literal name — every command uses `docker compose exec neo4j`, the *service* name, not the container name. Verified as a real fix, not just a guess: the working copy and the fresh clone genuinely ran with different auto-generated container names side by side, only blocked afterward by an unrelated, expected port conflict (both mapping to host `7474`/`7687`) that has nothing to do with the naming fix. `README.md` real. Bonus items are the only thing left, now legitimately unblocked. |
+
+## Final pre-submission review against the brief's exact text — closed
+
+**All five findings below are now live-verified, not just fixed and hoped.**
+`python3 scripts/reconcile.py --firm firm_a` and `--firm firm_b` both now show config genuinely
+loaded from YAML, `13/13 traceable`, `13/13 reconciled`, `Audit chain: VALID`, and — for the first
+time in this project — `Firewall: PASS` as part of the same single run, `OVERALL: PASS` on both.
+Every one of Phase 5's three explicit requirements (reconciliation, traceability, firewall) is now
+demonstrated together, by the one script the brief calls "the single documented command", exactly
+as asked.
+
+Before calling this submission-ready, re-read the original brief line by line and checked our
+actual code against it — not memory of either. Found four real gaps, two of them significant:
+
+1. **CRITICAL — `scripts/reconcile.py` never actually read the config file.** Our primary,
+   README-documented, most-tested entrypoint used `--firm` to select between two hardcoded method
+   calls (`compute_firm_a_figures()`/`compute_firm_b_figures()`), not to load
+   `configs/{firm}.yaml`. Numerically correct every single time this was tested this week, because
+   those methods' bodies hardcoded the same values the YAML files also contain — but the
+   *mechanism* constraint 5 asks for ("reconfigurable... without changing engine code") wasn't what
+   was actually being demonstrated by the one script an evaluator is told to run. This is the exact
+   bug already caught and fixed once, in `engine.py`'s own CLI, days earlier — the fix never got
+   propagated to `reconcile.py`, which was built independently afterward and became the more
+   prominent script. Fixed: `reconcile.py` now calls `load_firm_config()` for real.
+2. **SIGNIFICANT — Phase 5's explicit three-part requirement was only two-thirds implemented.**
+   The brief asks for one script reporting reconciliation, traceability, *and* a firewall check.
+   The firewall was fully built and tested (`src/narrative/firewall.py`, 8 offline tests, a live
+   adversarial test) — but lived only inside `generate_narrative()`, a code path
+   `scripts/reconcile.py` never called. An evaluator running the documented single command would
+   never see constraint 3 actually verified, only asserted in the docs. Fixed: the firewall check
+   now runs as part of `reconcile.py`'s standard output, gated on `GEMINI_API_KEY` being present
+   (skips with an honest note otherwise, rather than making the zero-API-key core checks depend on
+   an optional key).
+3. **MODERATE — two documented audit events were never actually logged.** `CONFIG_CHANGED` and
+   `FIREWALL_CHECK_RUN` both appear in `docs/01_flow_and_audit_events.md`'s catalogue as real,
+   implemented events with specific payloads — neither was logged by any production code path
+   (`CONFIG_CHANGED` only appeared in `audit/logger.py`'s own synthetic self-test). Fixed as a
+   natural consequence of fixes 1 and 2.
+4. **MINOR — the `Citation` object lacked `passage_summary`.** The brief's own example figure JSON
+   includes a human-readable passage summary; ours only returned `source_document`/`page`/
+   `chunk_id`. The underlying text (`raw_text`) was already stored on every `SourceChunk` node
+   since Day 2, just never queried back out. Fixed: `citation_for_node()` now returns it,
+   `Citation` carries it, `replay.py` displays it.
+
+All four fixed in one pass, full offline regression run afterward (zero regressions in anything
+unaffected). **The live-database paths touched by these fixes — config loading via
+`Neo4jFigureEngine`, the firewall's actual LLM call inside `reconcile.py` — are genuinely untested
+in this sandbox**, same honest flag as every other Neo4j/LLM-dependent change this week. Handed off
+for a final live re-verification before actual submission.
+
+**That live re-verification immediately found a fifth, genuine bug** — proof the review process
+itself was worth doing, not just the fixes it started with. `scripts/reconcile.py --firm firm_a`
+and `--firm firm_b` both ran perfectly through config loading, traceability, reconciliation, and
+the audit chain — then the newly-wired-in firewall check failed both, with "unaccounted numbers:
+13, 1, 1, 11" (Firm A) and "13, 3, 1, 9" (Firm B). Traced precisely rather than assumed: those
+numbers exactly match `src/narrative/retrieval.py`'s `global_summary()` status counts
+(total/breach/at_limit/ok), just reordered by the model's own paraphrasing — not a fabrication, a
+false positive. When `retrieval.py` was built (bonus item work) and wired into the prompt, the
+firewall's allowed-number set was never updated to recognize these new *aggregate* numbers — it
+only ever scanned individual figures' fields, with no concept of counts computed across the whole
+set. This had never been caught before because the two prior live narrative tests both predate
+`retrieval.py` being wired in — fixing gap #2 above (wiring the firewall into `reconcile.py`) is
+what exercised this exact code path live for the first time, and it failed immediately.
+
+Fixed precisely: `check_narrative_firewall()` now accepts `additional_allowed_numbers`, and
+`generate_narrative()` passes through the *same* `count_by_status()` values that went into the
+prompt — single source of truth, not two places that could drift apart again. Verified three ways
+before committing: reconstructed the exact failing narrative text and confirmed the old code
+reproduces the exact same violations reported live (proving the diagnosis, not just patching
+something and hoping); confirmed the new code passes on that same text; confirmed the fix is
+precise, not a blanket loosening, by checking that a narrative combining the legitimate counts with
+a genuinely fabricated number still correctly fails, catching only the fabrication.
 
 ## Bonus items (capped +5 total, per the brief)
 

@@ -28,7 +28,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.computation.engine import Neo4jFigureEngine, UntraceableFigureError
 from src.computation.rules import load_firm_config_dict
-from src.reconciliation.reconciler import build_firm_b_expected, load_firm_a_answer_key
+from src.reconciliation.reconciler import (build_firm_b_expected,
+                                           load_firm_a_answer_key)
 
 ANSWER_KEY_PATH = PROJECT_ROOT / "sample_docs/firm_A_answer_key.xlsx"
 
@@ -84,6 +85,8 @@ def replay(figure_id: str, firm: str) -> None:
     if match.citation:
         print(f"  {match.citation.source_document}, page {match.citation.source_page}, "
               f"chunk {match.citation.source_chunk}")
+        if match.citation.passage_summary:
+            print(f"  Passage: {match.citation.passage_summary}")
     else:
         print("  (none - this figure is untraceable, which should never happen here since "
               "compute_firm_*_figures() already raises on any unresolved citation)")

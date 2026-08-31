@@ -74,10 +74,15 @@ def citation_for_node(label: str, key_prop: str, key_val: str) -> tuple[str, dic
     """Generic citation lookup - works for any node type carrying exactly
     one SOURCED_FROM edge (AssetClass, Aggregate, ConcentrationCap,
     LiquidityRequirement, RiskMetric all qualify). Returns the
-    graph_path components + citation every Phase 3 figure needs."""
+    graph_path components + citation every Phase 3 figure needs,
+    including raw_text as the brief's example JSON's "passage_summary" -
+    stored on every SourceChunk node since Day 2 but not previously
+    surfaced by this query, found in a final pre-submission review
+    against the brief's exact expected output shape."""
     cypher = f"""
     MATCH (n:{label} {{{key_prop}: $key_val}})-[:SOURCED_FROM]->(c:SourceChunk)-[:PART_OF]->(d:SourceDocument)
-    RETURN c.page AS source_page, c.chunk_id AS source_chunk, d.filename AS source_document
+    RETURN c.page AS source_page, c.chunk_id AS source_chunk, d.filename AS source_document,
+           c.raw_text AS passage_summary
     """
     return cypher, {"key_val": key_val}
 

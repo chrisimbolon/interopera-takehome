@@ -24,7 +24,7 @@ structurally impossible for a language model to have produced or altered.
 ## Setup
 
 ```bash
-git clone <this repo>
+git clone https://github.com/chrisimbolon/interopera-takehome.git
 cd interopera-takehome
 
 python3 -m venv .venv
@@ -48,10 +48,14 @@ python3 scripts/reconcile.py --firm firm_b
 ```
 
 Each of these is genuinely one command, start to finish: it parses the guidelines PDF and holdings
-CSV, builds the knowledge graph, writes it to Neo4j (idempotent — safe to run repeatedly), computes
-all 13 figures via real graph traversal, runs the traceability check, reconciles against the real
-answer key, verifies the audit log's hash chain, and prints a pass/fail report with a matching exit
-code (`0` on full pass, `1` otherwise — usable in CI, not just interactively).
+CSV, builds the knowledge graph, writes it to Neo4j (idempotent — safe to run repeatedly), **loads
+the firm config file and passes its validated fields into the compute engine** (the actual
+config-driven switch constraint 5 requires, not a `--firm` flag picking between hardcoded code
+paths), computes all 13 figures via real graph traversal, runs the traceability check, reconciles
+against the real answer key, **runs the number firewall check if `GEMINI_API_KEY` is set** (skips
+with a clear note otherwise — the checks above never require one), verifies the audit log's hash
+chain, and prints a pass/fail report with a matching exit code (`0` on full pass, `1` otherwise —
+usable in CI, not just interactively).
 
 **Expected output:** `13/13 figures traceable`, `13/13 rows reconciled`, `Audit chain: VALID`,
 `OVERALL: PASS` — for both firms.
@@ -59,12 +63,80 @@ code (`0` on full pass, `1` otherwise — usable in CI, not just interactively).
 ## Verifying reconfiguration without a code edit (constraint 5)
 
 ```bash
-git diff configs/firm_a.yaml configs/firm_b.yaml   # real content differences
-git diff src/computation/                           # zero differences between the two runs above
+git diff configs/firm_a.yaml configs/firm_b.yaml
 ```
 
-The second command is the actual proof: the entire compute engine (`status.py`, `metrics.py`,
-`engine.py`) is byte-identical between a Firm A run and a Firm B run. Only the config file differs.
+Real content differences — the two firms' methods genuinely differ in the config file.
+
+The actual code-level proof isn't a `git diff` (on a fresh, unedited clone that would trivially
+show nothing, regardless of whether the system is really firm-agnostic — not meaningful evidence of
+anything). It's this:
+
+```bash
+grep -rn "firm_a\|firm_b" src/computation/status.py src/computation/metrics.py src/computation/engine.py
+```
+
+Every hit is a function/method **name** (`compute_all_figures_firm_a`), a docstring reference, or an
+`argparse` `choices` list — never a conditional branch on firm identity. `compute_all_figures_firm_a()`
+and `compute_all_figures_firm_b()` both call the identical `compute_all_figures()` function body,
+differing only in which three method-name strings get passed in.
+
+## Verifying determinism (constraint 1)
+
+The brief's own stated evaluation step: *"run the system twice and diff the numbers."*
+`scripts/verify_determinism.py` does exactly this — runs the full pipeline twice, completely
+independently (separate parses, separate compute calls, not cached objects reused), and diffs the
+canonical JSON output byte-for-byte.
+
+```bash
+python3 scripts/verify_determinism.py --live
+```
+
+**Expected output:** `firm_a: two independent live runs are byte-identical: True`, same for `firm_b`,
+`OVERALL: PASS`. Omit `--live` to run the same check purely offline, with no Neo4j dependency at all.
+
+## Tracing one figure through the graph (constraint 2)
+
+The brief's own stated evaluation step: *"trace one figure through the graph to its source."*
+`scripts/replay.py` looks up a single figure and shows exactly that: its value, its literal graph
+traversal path, its citation, its delta against the answer key, and — where relevant — which
+config method produced it.
+
+```bash
+python3 scripts/replay.py "aggregate::non_ig_exposure" --firm firm_b
+python3 scripts/replay.py "concentration::gre" --firm firm_a
+```
+
+Run `python3 scripts/replay.py --help` for the full list of valid figure IDs, or trigger the
+built-in error message (any nonexistent ID) to see all 13 printed.
+
+**Constraint 2's failure mode** (a citation genuinely missing, not just present) can be reproduced
+directly — `scripts/verify_provenance.py` deliberately bypasses `reconcile.py`'s auto-rebuild (which
+would silently heal any citation you delete before the check could ever see it broken):
+
+```bash
+python3 scripts/verify_provenance.py      # baseline - should show all 13 traceable
+
+docker compose exec neo4j cypher-shell -u neo4j -p interopera_dev_only \
+  "MATCH (a:AssetClass {name: 'MAS Bills'})-[r:SOURCED_FROM]->() DELETE r"
+
+python3 scripts/verify_provenance.py      # now - UntraceableFigureError, naming the exact figure
+
+python3 -m src.graph.builder --write      # restore (MERGE is idempotent)
+python3 scripts/verify_provenance.py      # back to all 13 traceable
+```
+
+## Bonus items
+
+- **Config mini-DSL live preview** — translates a firm config's raw YAML into plain English and
+  shows a live numeric diff against Firm A's baseline, with zero Neo4j dependency:
+  ```bash
+  python3 scripts/preview_config.py configs/firm_b.yaml
+  ```
+- **Reconciliation/replay viewer** — `scripts/replay.py`, see above.
+- **Global/local retrieval for the narrative layer** — no separate command; this is already active
+  inside `generate_narrative()` (see `src/narrative/retrieval.py`) every time the LLM path below is
+  used.
 
 ## The LLM path (Day 6) — optional, needs `GEMINI_API_KEY`
 
@@ -124,3 +196,9 @@ find:
   (`docs/00_metric_catalog.md`, "Out of scope for this report").
 - **No formal `tests/` pytest suite** — every module tests itself via `python3 -m <module>`
   (see any file's `if __name__ == "__main__":` block).
+
+## Author
+
+**Christyan Simbolon**
+- GitHub: [@chrisimbolon](https://github.com/chrisimbolon)
+- Portfolio: [chrisimbolon.dev](https://chrisimbolon.dev)

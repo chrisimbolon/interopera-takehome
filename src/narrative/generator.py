@@ -130,7 +130,11 @@ def generate_narrative(
     )
     narrative_text = response.text
 
-    firewall_result = check_narrative_firewall(narrative_text, figures)
+    from src.narrative.retrieval import count_by_status
+
+    counts = count_by_status(figures)
+    additional_allowed = {str(counts.total), str(counts.ok), str(counts.at_limit), str(counts.breach)}
+    firewall_result = check_narrative_firewall(narrative_text, figures, additional_allowed)
     if not firewall_result.passed:
         raise NarrativeRejectedError(firewall_result, narrative_text)
 
